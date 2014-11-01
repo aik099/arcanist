@@ -680,6 +680,8 @@ final class ArcanistDiffParser {
     $line = $this->getLine();
 
     if ($is_svn) {
+      $line = $this->processIDEAComment();
+
       $ok = preg_match('/^=+\s*$/', $line);
       if (!$ok) {
         $this->didFailParse("Expected '=======================' divider line.");
@@ -793,6 +795,31 @@ final class ArcanistDiffParser {
     $change->setOldPath($old_file);
 
     $this->parseChangeset($change);
+  }
+
+  private function processIDEAComment() {
+    $expected_lines = array(
+      'IDEA additional info:',
+      'Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP',
+      '<+>UTF-8',
+    );
+
+    if ($this->getLineTrimmed() !== $expected_lines[0]) {
+      // This is not IDEA comment - ignore.
+      return $this->getLine();
+    }
+
+    while ($expected_lines) {
+      $expected_line = array_shift($expected_lines);
+
+      if ($this->getLineTrimmed() !== $expected_line) {
+        $this->didFailParse("Expected '{$expected_line}'.");
+      }
+
+      $this->nextLine();
+    }
+
+    return $this->getLine();
   }
 
   private function parseGitBinaryPatch() {

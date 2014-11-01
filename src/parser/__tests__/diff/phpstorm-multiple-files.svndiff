@@ -1,0 +1,39 @@
+Index: themes/advanced/platform/inc/uploader/upload_manager.js
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+--- themes/advanced/platform/inc/uploader/upload_manager.js	(revision 16044)
++++ themes/advanced/platform/inc/uploader/upload_manager.js	(revision )
+@@ -100,7 +100,7 @@
+ };
+ 
+ UploadsManager.AddUploader = function(id, params) {
+-    this.Init();
++    this.Init(document.getElementById(id + '[upload]').form.id);
+
+     this._Uploaders[id] = new Uploader(id, params);
+ };
+@@ -349,4 +349,4 @@
+     } else {
+         console.log(message);
+     }
+-};
+\ No newline at end of file
++};
+Index: themes/advanced/platform/inc/form_manager.js
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+--- themes/advanced/platform/inc/form_manager.js	(revision 16044)
++++ themes/advanced/platform/inc/form_manager.js	(revision )
+@@ -7,7 +7,7 @@
+     this.fieldMask = '#PREFIX#[#ID#][#FIELD_NAME#]';
+
+     this.noErrorsHTML = '';
+-    this.checkTimeout = 1000;
++    this.checkTimeout = 2000;
+     this.pendingChecks = {};
+ 
+     this.fields = {};
