@@ -390,6 +390,10 @@ EOTEXT
         'help' => pht(
           'After creating a diff or revision, open it in a web browser.'),
       ),
+      'cl' => array(
+        'help' => 'Select changelist',
+        'supports' => array('svn'),
+      ),
       '*' => 'paths',
       'head' => array(
         'param' => 'commit',
@@ -615,6 +619,9 @@ EOTEXT
       $repository_api->setHeadCommit($head_commit);
     }
 
+    if ($repository_api instanceof ArcanistSubversionAPI) {
+      $repository_api->detectNestedWorkingCopies();
+    }
   }
 
   private function runDiffSetupBasics() {
@@ -637,6 +644,10 @@ EOTEXT
         }
         if ($repository_api instanceof ArcanistSubversionAPI) {
           $repository_api->limitStatusToPaths($this->getArgument('paths'));
+
+          if ($this->getArgument('cl')) {
+            $this->selectChangelist();
+          }
         }
         if (!$this->getArgument('head')) {
           $this->requireCleanWorkingCopy();

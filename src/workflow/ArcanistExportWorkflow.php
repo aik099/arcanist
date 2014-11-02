@@ -78,6 +78,10 @@ EOTEXT
           'Instead of exporting changes from the working copy, export them '.
           'from a Differential diff.',
       ),
+      'cl' => array(
+        'help' => 'Select changelist',
+        'supports' => array('svn'),
+      ),
       '*' => 'paths',
     );
   }
@@ -200,13 +204,21 @@ EOTEXT
             ));
 
           list($author) = $repository_api->execxLocal('showconfig ui.username');
-        } else {
-          // TODO: paths support
+        } else if ($repository_api instanceof ArcanistSubversionAPI) {
+          $repository_api->detectNestedWorkingCopies();
+          $repository_api->limitStatusToPaths($this->getArgument('paths'));
+
+          if ($this->getArgument('cl')) {
+            $this->selectChangelist();
+          }
+
           $paths = $repository_api->getWorkingCopyStatus();
           $changes = $parser->parseSubversionDiff(
             $repository_api,
             $paths);
           $author = $this->getUserName();
+        } else {
+          throw new ArcanistUsageException(pht('Unknown repository VCS type.'));
         }
 
         $bundle = ArcanistBundle::newFromChanges($changes);
