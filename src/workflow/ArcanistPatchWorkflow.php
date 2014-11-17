@@ -581,7 +581,7 @@ EOTEXT
           Filesystem::writeFile($tmp, $patch);
           passthru(
             csprintf(
-              '(cd %s; patch -p0 < %s)',
+              '(cd %s; patch -p0 --no-backup-if-mismatch < %s)',
               $repository_api->getPath(),
               $tmp),
             $err);

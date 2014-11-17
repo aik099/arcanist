@@ -998,6 +998,34 @@ abstract class ArcanistWorkflow extends Phobject {
     return false;
   }
 
+  final protected function selectChangelist() {
+    $repository_api = $this->getRepositoryAPI();
+
+    if ($repository_api instanceof ArcanistSubversionAPI) {
+      $changelists = $repository_api->getChangelists();
+
+      $msg = "Select changelist from below:\n";
+
+      $changelist_number = 0;
+      foreach ($changelists as $changelist_name) {
+        $msg .= "    [$changelist_number] $changelist_name\n";
+        $changelist_number++;
+      }
+
+      $msg .= 'Pick changelist by number [0]:';
+
+      $selection = phutil_console_prompt($msg);
+
+      if ((int)$selection) {
+        $selected_changelist = $changelists[(int)$selection];
+        $repository_api->limitStatusToChangelist($selected_changelist);
+      }
+    } else {
+      throw new ArcanistUsageException(
+        'Changelist selection is supported only in svn repositories.');
+    }
+  }
+
   private function askForAdd(array $files) {
     if ($this->commitMode == self::COMMIT_DISABLE) {
       return false;

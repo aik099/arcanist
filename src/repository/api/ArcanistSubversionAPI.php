@@ -15,6 +15,9 @@ final class ArcanistSubversionAPI extends ArcanistRepositoryAPI {
   private $svnBaseRevisionNumber;
   private $statusPaths = array();
 
+  private $changelist;
+  private $workingCopies = array();
+
   public function getSourceControlSystemName() {
     return 'svn';
   }
@@ -67,6 +70,75 @@ final class ArcanistSubversionAPI extends ArcanistRepositoryAPI {
     return $this;
   }
 
+  public function limitStatusToChangelist($changelist) {
+    $this->changelist = $changelist;
+    return $this;
+  }
+
+  public function getCurrentChangelist() {
+    return $this->changelist;
+  }
+
+  public function getChangelists() {
+    list($status) = $this->execxLocal('--xml status %Ls', $this->workingCopies);
+
+    $result = array();
+    $xml = new SimpleXMLElement($status);
+
+    foreach ($xml as $node) {
+      if ($node->getName() == 'changelist') {
+        $result[] = (string)$node['name'];
+      } else {
+        if ($node->getName() != 'target') {
+          throw new Exception('Unknown entry type: '.$node->getName());
+        }
+      }
+    }
+
+    sort($result, SORT_STRING);
+
+    return array_merge(array('Default'), $result);
+  }
+
+  public function detectNestedWorkingCopies() {
+    list($status) = $this->execxLocal('--xml status');
+
+    $xml = new SimpleXMLElement($status);
+
+    $unversioned = array('./');
+
+    foreach ($xml->target as $target) {
+      foreach ($target->entry as $entry) {
+        $pp = (string)$entry['path'];
+
+        $item = (string)($entry->{'wc-status'}[0]['item']);
+        $status = $this->parseSVNStatus($item);
+
+        $svn_dir = $this->getPath($pp.DIRECTORY_SEPARATOR.'.svn');
+
+        if ($status == self::FLAG_UNTRACKED && is_dir($this->getPath($pp)) && file_exists($svn_dir)) {
+          $unversioned[] = $pp;
+        }
+      }
+    }
+
+    list($svn_info) = $this->execxLocal('--xml info %Ls', $unversioned);
+    $svn_info_xml = new SimpleXMLElement($svn_info);
+
+    $working_copies = array();
+
+    foreach ($svn_info_xml->entry as $entry) {
+      $working_copies[] = (string)$entry->{'wc-info'}->{'wcroot-abspath'};
+    }
+
+    // This SVN 1.6- working copy, where "wcroot-abspath" isn't available.
+    if (count($working_copies) == 1 && $working_copies[0] == '') {
+      $working_copies[0] = $this->path;
+    }
+
+    $this->workingCopies = $working_copies;
+  }
+
   public function getSVNStatus($with_externals = false) {
     if ($this->svnStatus === null) {
       if ($this->statusPaths) {
@@ -74,15 +146,20 @@ final class ArcanistSubversionAPI extends ArcanistRepositoryAPI {
           '--xml status %Ls',
           $this->statusPaths);
       } else {
-        list($status) = $this->execxLocal('--xml status');
+        list($status) = $this->execxLocal('--xml status %Ls', $this->workingCopies);
       }
       $xml = new SimpleXMLElement($status);
 
       $externals = array();
       $files = array();
 
-      foreach ($xml->target as $target) {
-        $this->svnBaseRevisions = array();
+      $this->svnBaseRevisions = array();
+      foreach ($xml as $target) {
+        if ($target->getName() === 'changelist' && (string)$target['name'] !== $this->changelist) {
+          continue;
+        }
+
+        $merge_from_target = $this->changelist && $target->getName() === 'target';
         foreach ($target->entry as $entry) {
           $path = (string)$entry['path'];
           // On Windows, we get paths with backslash directory separators here.
@@ -90,13 +167,16 @@ final class ArcanistSubversionAPI extends ArcanistRepositoryAPI {
           if (phutil_is_windows()) {
             $path = str_replace(DIRECTORY_SEPARATOR, '/', $path);
           }
+          // Convert absolute path to relative.
+          $path = ltrim(preg_replace(
+            '/^'.preg_quote($this->path, '/').'/',
+            '', $path, 1), DIRECTORY_SEPARATOR);
+          $path = $path ?: '.';
+
           $mask = 0;
 
           $props = (string)($entry->{'wc-status'}[0]['props']);
           $item  = (string)($entry->{'wc-status'}[0]['item']);
-
-          $base = (string)($entry->{'wc-status'}[0]['revision']);
-          $this->svnBaseRevisions[$path] = $base;
 
           switch ($props) {
             case 'none':
@@ -110,6 +190,13 @@ final class ArcanistSubversionAPI extends ArcanistRepositoryAPI {
           }
 
           $mask |= $this->parseSVNStatus($item);
+          if ($merge_from_target && !($mask & self::FLAG_UNTRACKED) && !($mask & self::FLAG_MISSING)) {
+            continue;
+          }
+
+          $base = (string)($entry->{'wc-status'}[0]['revision']);
+          $this->svnBaseRevisions[$path] = $base;
+
           if ($item == 'external') {
             $externals[] = $path;
           }
@@ -192,6 +279,12 @@ final class ArcanistSubversionAPI extends ArcanistRepositoryAPI {
       $this->execxLocal(
         'delete -- %Ls',
         array_diff($paths, $add));
+    }
+    if ($this->changelist) {
+      $this->execxLocal(
+        'changelist %s %Ls',
+        $this->changelist,
+        $paths);
     }
     $this->svnStatus = null;
   }
@@ -603,7 +696,17 @@ EODIFF;
   }
 
   public function getLocalCommitInformation() {
-    return null;
+    // SVN repository does not support getLocalCommitInformation,
+    // so we fake some data in compatible way
+    $commits = array(
+      '#fake-hash' => array(
+        'commit' => '#fake-hash',
+        'summary' => 'Ignore it :)',
+        'message' => $this->getCurrentChangelist(),
+      ),
+    );
+
+    return $commits;
   }
 
   public function isHistoryDefaultImmutable() {
