@@ -177,6 +177,7 @@ final class ArcanistSubversionAPI extends ArcanistRepositoryAPI {
 
           $props = (string)($entry->{'wc-status'}[0]['props']);
           $item  = (string)($entry->{'wc-status'}[0]['item']);
+          $file_external = (string)($entry->{'wc-status'}[0]['file-external']) === 'true';
 
           switch ($props) {
             case 'none':
@@ -197,7 +198,7 @@ final class ArcanistSubversionAPI extends ArcanistRepositoryAPI {
           $base = (string)($entry->{'wc-status'}[0]['revision']);
           $this->svnBaseRevisions[$path] = $base;
 
-          if ($item == 'external') {
+          if ($item == 'external' || $file_external) {
             $externals[] = $path;
           }
 

@@ -815,7 +815,7 @@ EOTEXT
         if ($mask & ArcanistRepositoryAPI::FLAG_EXTERNALS) {
           unset($paths[$path]);
           if ($any_mod) {
-            $warn_externals[] = $path;
+            $warn_externals[$path] = $mask;
           }
         }
       }
@@ -828,10 +828,10 @@ EOTEXT
           "\n\n".
           "Modified 'svn:externals' files:".
           "\n\n".
-          phutil_console_wrap(implode("\n", $warn_externals), 8));
+          phutil_console_wrap(implode("\n", array_keys($warn_externals)), 8));
         $prompt = 'Generate a diff (with just local changes) anyway?';
         if (!phutil_console_confirm($prompt)) {
-          throw new ArcanistUserAbortException();
+          $paths = $paths + $warn_externals;
         } else {
           $this->hasWarnedExternals = true;
         }
