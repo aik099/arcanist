@@ -101,39 +101,38 @@ final class ArcanistSubversionAPI extends ArcanistRepositoryAPI {
   }
 
   public function detectNestedWorkingCopies() {
-    list($status) = $this->execxLocal('--xml status');
-
+    list($status) = $this->execxLocal('--xml status %s', $this->getPath());
     $xml = new SimpleXMLElement($status);
 
-    $unversioned = array('./');
+    $working_copy_candidates = array($this->getPath());
 
+    // Only, if nested working copies are not from "svn:externals" property.
     foreach ($xml->target as $target) {
       foreach ($target->entry as $entry) {
-        $pp = (string)$entry['path'];
+        $sub_path = (string)$entry['path'];
+
+        if (!is_dir($sub_path)) {
+          continue;
+        }
 
         $item = (string)($entry->{'wc-status'}[0]['item']);
-        $status = $this->parseSVNStatus($item);
+        $item_status = $this->parseSVNStatus($item);
 
-        $svn_dir = $this->getPath($pp.DIRECTORY_SEPARATOR.'.svn');
-
-        if ($status == self::FLAG_UNTRACKED && is_dir($this->getPath($pp)) && file_exists($svn_dir)) {
-          $unversioned[] = $pp;
+        // TODO: Do a recursive scan if ".svn" sub-folder not found.
+        if ($item_status == self::FLAG_UNTRACKED
+          && file_exists($sub_path.DIRECTORY_SEPARATOR.'.svn')
+        ) {
+          $working_copy_candidates[] = $sub_path;
         }
       }
     }
 
-    list($svn_info) = $this->execxLocal('--xml info %Ls', $unversioned);
-    $svn_info_xml = new SimpleXMLElement($svn_info);
-
     $working_copies = array();
+    list($info) = $this->execxLocal('--xml info %Ls', $working_copy_candidates);
+    $xml = new SimpleXMLElement($info);
 
-    foreach ($svn_info_xml->entry as $entry) {
-      $working_copies[] = (string)$entry->{'wc-info'}->{'wcroot-abspath'};
-    }
-
-    // This SVN 1.6- working copy, where "wcroot-abspath" isn't available.
-    if (count($working_copies) == 1 && $working_copies[0] == '') {
-      $working_copies[0] = $this->path;
+    foreach ($xml->entry as $entry) {
+      $working_copies[] = (string)$entry['path'];
     }
 
     $this->workingCopies = $working_copies;
