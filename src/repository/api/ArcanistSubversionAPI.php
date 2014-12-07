@@ -55,7 +55,7 @@ final class ArcanistSubversionAPI extends ArcanistRepositoryAPI {
   }
 
   protected function buildUncommittedStatus() {
-    return $this->getSVNStatus();
+    return $this->getSVNStatus(true);
   }
 
   public function getSVNBaseRevisions() {
@@ -468,7 +468,7 @@ final class ArcanistSubversionAPI extends ArcanistRepositoryAPI {
 
 
   public function getRawDiffText($path) {
-    $status = $this->getSVNStatus();
+    $status = $this->getSVNStatus(true);
     if (!isset($status[$path])) {
       return null;
     }
