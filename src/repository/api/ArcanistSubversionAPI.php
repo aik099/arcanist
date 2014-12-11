@@ -145,7 +145,9 @@ final class ArcanistSubversionAPI extends ArcanistRepositoryAPI {
           '--xml status %Ls',
           $this->statusPaths);
       } else {
-        list($status) = $this->execxLocal('--xml status %Ls', $this->workingCopies);
+        list($status) = $this->execxLocal(
+          '--xml status %Ls',
+          $this->workingCopies);
       }
       $xml = new SimpleXMLElement($status);
 
@@ -154,11 +156,13 @@ final class ArcanistSubversionAPI extends ArcanistRepositoryAPI {
 
       $this->svnBaseRevisions = array();
       foreach ($xml as $target) {
-        if ($target->getName() === 'changelist' && (string)$target['name'] !== $this->changelist) {
+        if ($target->getName() === 'changelist'
+          && (string)$target['name'] !== $this->changelist) {
           continue;
         }
 
-        $merge_from_target = $this->changelist && $target->getName() === 'target';
+        $merge_from_target =
+          $this->changelist && $target->getName() === 'target';
         foreach ($target->entry as $entry) {
           $path = (string)$entry['path'];
           // On Windows, we get paths with backslash directory separators here.
@@ -170,13 +174,14 @@ final class ArcanistSubversionAPI extends ArcanistRepositoryAPI {
           $path = ltrim(preg_replace(
             '/^'.preg_quote($this->path, '/').'/',
             '', $path, 1), DIRECTORY_SEPARATOR);
-          $path = $path ?: '.';
+          $path = $path ? $path : '.';
 
           $mask = 0;
 
           $props = (string)($entry->{'wc-status'}[0]['props']);
           $item  = (string)($entry->{'wc-status'}[0]['item']);
-          $file_external = (string)($entry->{'wc-status'}[0]['file-external']) === 'true';
+          $file_external =
+            (string)($entry->{'wc-status'}[0]['file-external']) === 'true';
 
           switch ($props) {
             case 'none':
@@ -190,7 +195,8 @@ final class ArcanistSubversionAPI extends ArcanistRepositoryAPI {
           }
 
           $mask |= $this->parseSVNStatus($item);
-          if ($merge_from_target && !($mask & self::FLAG_UNTRACKED) && !($mask & self::FLAG_MISSING)) {
+          if ($merge_from_target &&
+            !($mask & self::FLAG_UNTRACKED) && !($mask & self::FLAG_MISSING)) {
             continue;
           }
 
