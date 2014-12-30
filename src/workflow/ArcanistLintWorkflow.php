@@ -154,6 +154,10 @@ EOTEXT
           "determined by 'arc.lint.cache' in configuration, which defaults ".
           "to off. See notes in 'arc.lint.cache'.",
       ),
+      'cl' => array(
+        'help' => 'Select changelist',
+        'supports' => array('svn'),
+      ),
       '*' => 'paths',
     );
   }
@@ -213,6 +217,10 @@ EOTEXT
       $this->shouldLintAll = true;
     } else if ($this->getArgument('only-changed')) {
       $this->shouldLintAll = false;
+    }
+
+    if ($this->getArgument('cl')) {
+      $this->selectChangelist();
     }
 
     if ($everything) {
