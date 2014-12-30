@@ -453,13 +453,11 @@ abstract class ArcanistLintEngine {
 
   final private function isRelevantMessage(ArcanistLintMessage $message) {
     // When a user runs "arc lint", we default to raising only warnings on
-    // lines they have changed (errors are still raised anywhere in the
-    // file). The list of $changed lines may be null, to indicate that the
-    // path is a directory or a binary file so we should not exclude
-    // warnings.
+    // lines they have changed. The list of $changed lines may be null, to
+    // indicate that the path is a directory or a binary file so we should
+    // not exclude warnings.
 
     if (!$this->changedLines ||
-        $message->isError() ||
         $message->shouldBypassChangedLineFiltering()) {
       return true;
     }
