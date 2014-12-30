@@ -223,6 +223,12 @@ EOTEXT
           $change->getFileType());
         $this->assertEqual(count($change->getHunks()), 0);
         break;
+      case 'phpstorm-multiple-files.svndiff':
+        $this->assertEqual(2, count($changes));
+        $change = reset($changes);
+        $this->assertEqual(2, count($change->getHunks()));
+        $this->assertEqual($change->getOldPath(), $change->getCurrentPath());
+        break;
       case 'git-delete-file.gitdiff':
         $this->assertEqual(1, count($changes));
         $change = reset($changes);

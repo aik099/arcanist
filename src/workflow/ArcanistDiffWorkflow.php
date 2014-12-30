@@ -434,18 +434,6 @@ EOTEXT
 
     $this->runDiffSetupBasics();
 
-    $commit_message = $this->buildCommitMessage();
-
-    $this->dispatchEvent(
-      ArcanistEventType::TYPE_DIFF_DIDBUILDMESSAGE,
-      array(
-        'message' => $commit_message,
-      ));
-
-    if (!$this->shouldOnlyCreateDiff()) {
-      $revision = $this->buildRevisionFromCommitMessage($commit_message);
-    }
-
     $server = $this->console->getServer();
     $server->setHandler(array($this, 'handleServerMessage'));
     $data = $this->runLintUnit();
@@ -472,6 +460,19 @@ EOTEXT
     if (!$changes) {
       throw new ArcanistUsageException(
         'There are no changes to generate a diff from!');
+    }
+
+    $commit_message = $this->buildCommitMessage($changes);
+
+    $this->dispatchEvent(
+      ArcanistEventType::TYPE_DIFF_DIDBUILDMESSAGE,
+      array(
+        'message' => $commit_message,
+      ));
+
+    if (!$this->shouldOnlyCreateDiff()) {
+      $revision = $this->buildRevisionFromCommitMessage($commit_message,
+        $changes);
     }
 
     $diff_spec = array(
@@ -681,7 +682,7 @@ EOTEXT
   }
 
   private function buildRevisionFromCommitMessage(
-    ArcanistDifferentialCommitMessage $message) {
+    ArcanistDifferentialCommitMessage $message, array $changes) {
 
     $conduit = $this->getConduit();
 
@@ -753,6 +754,7 @@ EOTEXT
 
         $update_messages[$revision_id] = $this->getUpdateMessage(
           $revision['fields'],
+          $changes,
           idx($update_messages, $revision_id));
 
         $revision['message'] = ArcanistCommentRemover::removeComments(
@@ -813,7 +815,7 @@ EOTEXT
         if ($mask & ArcanistRepositoryAPI::FLAG_EXTERNALS) {
           unset($paths[$path]);
           if ($any_mod) {
-            $warn_externals[] = $path;
+            $warn_externals[$path] = $mask;
           }
         }
       }
@@ -826,10 +828,10 @@ EOTEXT
           "\n\n".
           "Modified 'svn:externals' files:".
           "\n\n".
-          phutil_console_wrap(implode("\n", $warn_externals), 8));
+          phutil_console_wrap(implode("\n", array_keys($warn_externals)), 8));
         $prompt = 'Generate a diff (with just local changes) anyway?';
         if (!phutil_console_confirm($prompt)) {
-          throw new ArcanistUserAbortException();
+          $paths = $paths + $warn_externals;
         } else {
           $this->hasWarnedExternals = true;
         }
@@ -1433,7 +1435,7 @@ EOTEXT
   /**
    * @task message
    */
-  private function buildCommitMessage() {
+  private function buildCommitMessage(array $changes) {
     if ($this->getArgument('preview') || $this->getArgument('only')) {
       return null;
     }
@@ -1449,7 +1451,7 @@ EOTEXT
     }
 
     if ($is_verbatim) {
-      return $this->getCommitMessageFromUser();
+      return $this->getCommitMessageFromUser($changes);
     }
 
 
@@ -1481,7 +1483,7 @@ EOTEXT
       if ($message_file) {
         return $this->getCommitMessageFromFile($message_file);
       } else {
-        return $this->getCommitMessageFromUser();
+        return $this->getCommitMessageFromUser($changes);
       }
     } else if ($is_update) {
       $revision_id = $this->normalizeRevisionID($is_update);
@@ -1513,7 +1515,7 @@ EOTEXT
   /**
    * @task message
    */
-  private function getCommitMessageFromUser() {
+  private function getCommitMessageFromUser(array $changes) {
     $conduit = $this->getConduit();
 
     $template = null;
@@ -1605,6 +1607,7 @@ EOTEXT
         'Describe the changes in this new revision.',
       ),
       $included,
+      $this->generateIncludedChanges($changes),
       array(
         '',
         'arc could not identify any existing revision in your working copy.',
@@ -1719,6 +1722,26 @@ EOTEXT
     return $message;
   }
 
+  /**
+   * @task message
+   */
+  private function generateIncludedChanges(array $changes) {
+    $included_changes = array();
+      foreach ($changes as $change) {
+        $included_changes[] = '        '.$change->renderTextSummary();
+      }
+
+      $included_changes = array_merge(
+        array(
+          '',
+          'Included changes:',
+          '',
+        ),
+        $included_changes);
+
+    return $included_changes;
+  }
+
 
   /**
    * @task message
@@ -1821,7 +1844,10 @@ EOTEXT
   /**
    * @task message
    */
-  private function getUpdateMessage(array $fields, $template = '') {
+  private function getUpdateMessage(
+    array $fields,
+    array $changes,
+    $template = '') {
     if ($this->getArgument('raw')) {
       throw new ArcanistUsageException(
         "When using '--raw' to update a revision, specify an update message ".
@@ -1841,6 +1867,7 @@ EOTEXT
 
     if ($template == '') {
       $comments = $this->getDefaultUpdateMessage();
+      $included_changes = $this->generateIncludedChanges($changes);
 
       $template =
         rtrim($comments).
@@ -1849,6 +1876,7 @@ EOTEXT
         "#\n".
         "# Enter a brief description of the changes included in this update.\n".
         "# The first line is used as subject, next lines as comment.\n".
+        '#'.implode("\n# ", $included_changes)."\n".
         "#\n".
         "# If you intended to create a new revision, use:\n".
         "#  $ arc diff --create\n".
