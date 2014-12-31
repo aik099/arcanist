@@ -1148,7 +1148,9 @@ EOTEXT
       $targets[] = array('command' => 'info', 'path' => $path);
     }
 
-    foreach (Futures($futures)->limit(8) as $key => $future) {
+    $futures = id(new FutureIterator($futures))
+      ->limit(8);
+    foreach ($futures as $key => $future) {
       $target = $targets[$key];
       if ($target['command'] == 'diff') {
         $repository_api->primeSVNDiffResult(
@@ -1808,7 +1810,7 @@ EOTEXT
         ));
     }
 
-    foreach (Futures($futures) as $key => $future) {
+    foreach (new FutureIterator($futures) as $key => $future) {
       $result = $future->resolve();
       switch ($key) {
         case 'revision':
@@ -2432,7 +2434,8 @@ EOTEXT
    * @task diffprop
    */
   private function resolveDiffPropertyUpdates() {
-    Futures($this->diffPropertyFutures)->resolveAll();
+    id(new FutureIterator($this->diffPropertyFutures))
+      ->resolveAll();
     $this->diffPropertyFutures = array();
   }
 
@@ -2561,7 +2564,9 @@ EOTEXT
           ));
       }
 
-      foreach (Futures($hash_futures)->limit(8) as $key => $future) {
+      $futures = id(new FutureIterator($hash_futures))
+        ->limit(8);
+      foreach ($futures as $key => $future) {
         $type = $need_upload[$key]['type'];
         $change = $need_upload[$key]['change'];
         $name = $need_upload[$key]['name'];
@@ -2592,7 +2597,9 @@ EOTEXT
         ));
     }
 
-    foreach (Futures($upload_futures)->limit(4) as $key => $future) {
+    $futures = id(new FutureIterator($upload_futures))
+      ->limit(4);
+    foreach ($futures as $key => $future) {
       $type = $need_upload[$key]['type'];
       $change = $need_upload[$key]['change'];
       $name = $need_upload[$key]['name'];
