@@ -49,7 +49,10 @@ final class ArcanistXHPASTLinter extends ArcanistBaseXHPASTLinter {
   const LINT_EMPTY_STATEMENT           = 47;
   const LINT_ARRAY_SEPARATOR           = 48;
   const LINT_CONSTRUCTOR_PARENTHESES   = 49;
+  const LINT_DUPLICATE_SWITCH_CASE     = 50;
+  const LINT_BLACKLISTED_FUNCTION      = 50;
 
+  private $blacklistedFunctions = array();
   private $naminghook;
   private $switchhook;
   private $version;
@@ -109,6 +112,8 @@ final class ArcanistXHPASTLinter extends ArcanistBaseXHPASTLinter {
       self::LINT_EMPTY_STATEMENT           => 'Empty Block Statement',
       self::LINT_ARRAY_SEPARATOR           => 'Array Separator',
       self::LINT_CONSTRUCTOR_PARENTHESES   => 'Constructor Parentheses',
+      self::LINT_DUPLICATE_SWITCH_CASE     => 'Duplicate Case Statements',
+      self::LINT_BLACKLISTED_FUNCTION      => 'Use of Blacklisted Function',
     );
   }
 
@@ -155,6 +160,10 @@ final class ArcanistXHPASTLinter extends ArcanistBaseXHPASTLinter {
 
   public function getLinterConfigurationOptions() {
     return parent::getLinterConfigurationOptions() + array(
+      'xhpast.blacklisted.function' => array(
+        'type' => 'optional map<string, string>',
+        'help' => pht('Blacklisted functions which should not be used.'),
+      ),
       'xhpast.naminghook' => array(
         'type' => 'optional string',
         'help' => pht(
@@ -180,6 +189,9 @@ final class ArcanistXHPASTLinter extends ArcanistBaseXHPASTLinter {
 
   public function setLinterConfigurationValue($key, $value) {
     switch ($key) {
+      case 'xhpast.blacklisted.function':
+        $this->blacklistedFunctions = $value;
+        return;
       case 'xhpast.naminghook':
         $this->naminghook = $value;
         return;
@@ -199,7 +211,7 @@ final class ArcanistXHPASTLinter extends ArcanistBaseXHPASTLinter {
 
   public function getVersion() {
     // The version number should be incremented whenever a new rule is added.
-    return '10';
+    return '13';
   }
 
   protected function resolveFuture($path, Future $future) {
@@ -271,6 +283,8 @@ final class ArcanistXHPASTLinter extends ArcanistBaseXHPASTLinter {
       'lintEmptyBlockStatements' => self::LINT_EMPTY_STATEMENT,
       'lintArraySeparator' => self::LINT_ARRAY_SEPARATOR,
       'lintConstructorParentheses' => self::LINT_CONSTRUCTOR_PARENTHESES,
+      'lintSwitchStatements' => self::LINT_DUPLICATE_SWITCH_CASE,
+      'lintBlacklistedFunction' => self::LINT_BLACKLISTED_FUNCTION,
     );
 
     foreach ($method_codes as $method => $codes) {
@@ -448,27 +462,44 @@ final class ArcanistXHPASTLinter extends ArcanistBaseXHPASTLinter {
     foreach ($calls as $call) {
       $node = $call->getChildByIndex(0);
       $name = $node->getConcreteString();
-      $version = idx($compat_info['functions'], $name);
 
-      if ($version && version_compare($version['min'], $this->version, '>')) {
-        // Check if whitelisted.
-        $whitelisted = false;
-        foreach (idx($whitelist['function'], $name, array()) as $range) {
-          if (array_intersect($range, array_keys($node->getTokens()))) {
-            $whitelisted = true;
-            break;
-          }
+      $version = idx($compat_info['functions'], $name, array());
+      $min = idx($version, 'min');
+      $max = idx($version, 'max');
+
+      // Check if whitelisted.
+      $whitelisted = false;
+      foreach (idx($whitelist['function'], $name, array()) as $range) {
+        if (array_intersect($range, array_keys($node->getTokens()))) {
+          $whitelisted = true;
+          break;
         }
+      }
 
-        if ($whitelisted) {
-          continue;
-        }
+      if ($whitelisted) {
+        continue;
+      }
 
+      if ($min && version_compare($min, $this->version, '>')) {
         $this->raiseLintAtNode(
           $node,
           self::LINT_PHP_COMPATIBILITY,
-          "This codebase targets PHP {$this->version}, but `{$name}()` was ".
-          "not introduced until PHP {$version['min']}.");
+          pht(
+            'This codebase targets PHP %s, but `%s()` was not '.
+            'introduced until PHP %s.',
+            $this->version,
+            $name,
+            $min));
+      } else if ($max && version_compare($max, $this->version, '<')) {
+        $this->raiseLintAtNode(
+          $node,
+          self::LINT_PHP_COMPATIBILITY,
+          pht(
+            'This codebase targets PHP %s, but `%s()` was '.
+            'removed in PHP %s.',
+            $this->version,
+            $name,
+            $max));
       } else if (array_key_exists($name, $compat_info['params'])) {
         $params = $call->getChildOfType(1, 'n_CALL_PARAMETER_LIST');
         foreach (array_values($params->getChildren()) as $i => $param) {
@@ -477,9 +508,13 @@ final class ArcanistXHPASTLinter extends ArcanistBaseXHPASTLinter {
             $this->raiseLintAtNode(
               $param,
               self::LINT_PHP_COMPATIBILITY,
-              "This codebase targets PHP {$this->version}, but parameter ".
-              ($i + 1)." of `{$name}()` was not introduced until PHP ".
-              "{$version}.");
+              pht(
+                'This codebase targets PHP %s, but parameter %d '.
+                'of `%s()` was not introduced until PHP %s.',
+                $this->version,
+                $i + 1,
+                $name,
+                $version));
           }
         }
       }
@@ -491,15 +526,21 @@ final class ArcanistXHPASTLinter extends ArcanistBaseXHPASTLinter {
           $this->raiseLintAtNode(
             $node,
             self::LINT_PHP_COMPATIBILITY,
-            "This codebase targets PHP {$this->windowsVersion} on Windows, ".
-            "but `{$name}()` is not available there.");
+            pht(
+              'This codebase targets PHP %s on Windows, '.
+              'but `%s()` is not available there.',
+              $this->windowsVersion,
+              $name));
         } else if (version_compare($windows, $this->windowsVersion, '>')) {
           $this->raiseLintAtNode(
             $node,
             self::LINT_PHP_COMPATIBILITY,
-            "This codebase targets PHP {$this->windowsVersion} on Windows, ".
-            "but `{$name}()` is not available there until PHP ".
-            "{$this->windowsVersion}.");
+            pht(
+              'This codebase targets PHP %s on Windows, '.
+              'but `%s()` is not available there until PHP %s.',
+              $this->windowsVersion,
+              $name,
+              $windows));
         }
       }
     }
@@ -507,9 +548,10 @@ final class ArcanistXHPASTLinter extends ArcanistBaseXHPASTLinter {
     $classes = $root->selectDescendantsOfType('n_CLASS_NAME');
     foreach ($classes as $node) {
       $name = $node->getConcreteString();
-      $version = idx($compat_info['interfaces'], $name);
+      $version = idx($compat_info['interfaces'], $name, array());
       $version = idx($compat_info['classes'], $name, $version);
-      if ($version && version_compare($version['min'], $this->version, '>')) {
+      $min = idx($version, 'min');
+      $max = idx($version, 'max');
         // Check if whitelisted.
         $whitelisted = false;
         foreach (idx($whitelist['class'], $name, array()) as $range) {
@@ -523,11 +565,26 @@ final class ArcanistXHPASTLinter extends ArcanistBaseXHPASTLinter {
           continue;
         }
 
+      if ($min && version_compare($min, $this->version, '>')) {
         $this->raiseLintAtNode(
           $node,
           self::LINT_PHP_COMPATIBILITY,
-          "This codebase targets PHP {$this->version}, but `{$name}` was not ".
-          "introduced until PHP {$version['min']}.");
+          pht(
+            'This codebase targets PHP %s, but `%s` was not '.
+            'introduced until PHP %s.',
+            $this->version,
+            $name,
+            $min));
+      } else if ($max && version_compare($max, $this->version, '<')) {
+        $this->raiseLintAtNode(
+          $node,
+          self::LINT_PHP_COMPATIBILITY,
+          pht(
+            'This codebase targets PHP %s, but `%s` was '.
+            'removed in PHP %s.',
+            $this->version,
+            $name,
+            $max));
       }
     }
 
@@ -537,13 +594,30 @@ final class ArcanistXHPASTLinter extends ArcanistBaseXHPASTLinter {
     $constants = $root->selectDescendantsOfType('n_SYMBOL_NAME');
     foreach ($constants as $node) {
       $name = $node->getConcreteString();
-      $version = idx($compat_info['constants'], $name);
-      if ($version && version_compare($version['min'], $this->version, '>')) {
+      $version = idx($compat_info['constants'], $name, array());
+      $min = idx($version, 'min');
+      $max = idx($version, 'max');
+
+      if ($min && version_compare($min, $this->version, '>')) {
         $this->raiseLintAtNode(
           $node,
           self::LINT_PHP_COMPATIBILITY,
-          "This codebase targets PHP {$this->version}, but `{$name}` was not ".
-          "introduced until PHP {$version['min']}.");
+          pht(
+            'This codebase targets PHP %s, but `%s` was not '.
+            'introduced until PHP %s.',
+            $this->version,
+            $name,
+            $min));
+      } else if ($max && version_compare($max, $this->version, '<')) {
+        $this->raiseLintAtNode(
+          $node,
+          self::LINT_PHP_COMPATIBILITY,
+          pht(
+            'This codebase targets PHP %s, but `%s` was '.
+            'removed in PHP %s.',
+            $this->version,
+            $name,
+            $max));
       }
     }
 
@@ -2864,6 +2938,62 @@ final class ArcanistXHPASTLinter extends ArcanistBaseXHPASTLinter {
           self::LINT_CONSTRUCTOR_PARENTHESES,
           pht('Use parentheses when invoking a constructor.'),
           $class->getConcreteString().'()');
+      }
+    }
+  }
+
+  private function lintSwitchStatements(XHPASTNode $root) {
+    $switch_statements = $root->selectDescendantsOfType('n_SWITCH');
+
+    foreach ($switch_statements as $switch_statement) {
+      $case_statements = $switch_statement
+        ->getChildOfType(1, 'n_STATEMENT_LIST')
+        ->getChildrenOfType('n_CASE');
+      $nodes_by_case = array();
+
+      foreach ($case_statements as $case_statement) {
+        $case = $case_statement
+          ->getChildByIndex(0)
+          ->getSemanticString();
+        $nodes_by_case[$case][] = $case_statement;
+      }
+
+      foreach ($nodes_by_case as $case => $nodes) {
+        if (count($nodes) <= 1) {
+          continue;
+        }
+
+        $node = array_pop($nodes_by_case[$case]);
+        $message = $this->raiseLintAtNode(
+          $node,
+          self::LINT_DUPLICATE_SWITCH_CASE,
+          pht(
+            'Duplicate case in switch statement. PHP will ignore all '.
+            'but the first case.'));
+
+        $locations = array();
+        foreach ($nodes_by_case[$case] as $node) {
+          $locations[] = $this->getOtherLocation($node->getOffset());
+        }
+        $message->setOtherLocations($locations);
+      }
+    }
+  }
+
+  private function lintBlacklistedFunction(XHPASTNode $root) {
+    $calls = $root->selectDescendantsOfType('n_FUNCTION_CALL');
+
+    foreach ($calls as $call) {
+      $node = $call->getChildByIndex(0);
+      $name = $node->getConcreteString();
+
+      $reason = idx($this->blacklistedFunctions, $name);
+
+      if ($reason) {
+        $this->raiseLintAtNode(
+          $node,
+          self::LINT_BLACKLISTED_FUNCTION,
+          $reason);
       }
     }
   }
