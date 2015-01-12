@@ -56,7 +56,7 @@ abstract class ArcanistExternalLinter extends ArcanistFutureLinter {
    * @task bin
    */
   public function shouldExpectCommandErrors() {
-    return false;
+    return true;
   }
 
   /**
@@ -265,36 +265,39 @@ abstract class ArcanistExternalLinter extends ArcanistFutureLinter {
 
     if ($interpreter) {
       if (!Filesystem::binaryExists($interpreter)) {
-        throw new ArcanistUsageException(
+        throw new ArcanistMissingLinterException(
           pht(
-            'Unable to locate interpreter "%s" to run linter %s. You may '.
-            'need to install the interpreter, or adjust your linter '.
-            'configuration.'.
-            "\nTO INSTALL: %s",
+            'Unable to locate interpreter "%s" to run linter %s. You may need '.
+            'to install the interpreter, or adjust your linter configuration.',
             $interpreter,
-            get_class($this),
-            $this->getInstallInstructions()));
+            get_class($this)));
       }
       if (!Filesystem::pathExists($binary)) {
-        throw new ArcanistUsageException(
-          pht(
-            'Unable to locate script "%s" to run linter %s. You may need '.
-            'to install the script, or adjust your linter configuration. '.
-            "\nTO INSTALL: %s",
-            $binary,
-            get_class($this),
-            $this->getInstallInstructions()));
+        throw new ArcanistMissingLinterException(
+          sprintf(
+            "%s\n%s",
+            pht(
+              'Unable to locate script "%s" to run linter %s. You may need '.
+              'to install the script, or adjust your linter configuration.',
+              $binary,
+              get_class($this)),
+            pht(
+              'TO INSTALL: %s',
+              $this->getInstallInstructions())));
       }
     } else {
       if (!Filesystem::binaryExists($binary)) {
-        throw new ArcanistUsageException(
-          pht(
-            'Unable to locate binary "%s" to run linter %s. You may need '.
-            'to install the binary, or adjust your linter configuration. '.
-            "\nTO INSTALL: %s",
-            $binary,
-            get_class($this),
-            $this->getInstallInstructions()));
+        throw new ArcanistMissingLinterException(
+          sprintf(
+            "%s\n%s",
+            pht(
+              'Unable to locate binary "%s" to run linter %s. You may need '.
+              'to install the binary, or adjust your linter configuration.',
+              $binary,
+              get_class($this)),
+            pht(
+              'TO INSTALL: %s',
+              $this->getInstallInstructions())));
       }
     }
   }
@@ -415,7 +418,11 @@ abstract class ArcanistExternalLinter extends ArcanistFutureLinter {
         $future->resolvex();
       } else {
         throw new Exception(
-          "Linter failed to parse output!\n\n{$stdout}\n\n{$stderr}");
+          sprintf(
+            "%s\n\nSTDOUT\n%s\n\nSTDERR\n%s",
+            pht('Linter failed to parse output!'),
+            $stdout,
+            $stderr));
       }
     }
 
