@@ -82,11 +82,11 @@ EOTEXT
           continue;
         }
 
-        $supported = $workflow->getSupportedRevisionControlSystems();
-
-        $ok = (in_array('any', $supported) || in_array($vcs, $supported));
-        if (!$ok) {
-          continue;
+        if ($vcs || $workflow->requiresWorkingCopy()) {
+          $supported_vcs = $workflow->getSupportedRevisionControlSystems();
+          if (!in_array($vcs, $supported_vcs)) {
+            continue;
+          }
         }
 
         $complete[] = $name;

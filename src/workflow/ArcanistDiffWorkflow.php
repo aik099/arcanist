@@ -2212,10 +2212,11 @@ EOTEXT
 
   private function loadActiveLocalCommitInfo() {
     $current_diff = $this->getConduit()->callMethodSynchronous(
-      'differential.getdiff',
+      'differential.querydiffs',
       array(
-        'revision_id' => $this->revisionID,
+        'revisionIDs' => array($this->revisionID),
       ));
+    $current_diff = head($current_diff);
 
     $properties = idx($current_diff, 'properties', array());
     return idx($properties, 'local:commits', array());
