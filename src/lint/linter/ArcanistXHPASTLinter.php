@@ -55,6 +55,7 @@ final class ArcanistXHPASTLinter extends ArcanistBaseXHPASTLinter {
   const LINT_CALL_TIME_PASS_BY_REF      = 53;
   const LINT_FORMATTED_STRING           = 54;
   const LINT_UNNECESSARY_FINAL_MODIFIER = 55;
+  const LINT_UNNECESSARY_SEMICOLON      = 56;
 
   private $blacklistedFunctions = array();
   private $naminghook;
@@ -123,6 +124,7 @@ final class ArcanistXHPASTLinter extends ArcanistBaseXHPASTLinter {
       self::LINT_CALL_TIME_PASS_BY_REF      => 'Call-Time Pass-By-Reference',
       self::LINT_FORMATTED_STRING           => 'Formatted String',
       self::LINT_UNNECESSARY_FINAL_MODIFIER => 'Unnecessary Final Modifier',
+      self::LINT_UNNECESSARY_SEMICOLON      => 'Unnecessary Semicolon',
     );
   }
 
@@ -166,6 +168,7 @@ final class ArcanistXHPASTLinter extends ArcanistBaseXHPASTLinter {
       self::LINT_CONSTRUCTOR_PARENTHESES    => $advice,
       self::LINT_IMPLICIT_VISIBILITY        => $advice,
       self::LINT_UNNECESSARY_FINAL_MODIFIER => $advice,
+      self::LINT_UNNECESSARY_SEMICOLON      => $advice,
     );
   }
 
@@ -233,7 +236,7 @@ final class ArcanistXHPASTLinter extends ArcanistBaseXHPASTLinter {
 
   public function getVersion() {
     // The version number should be incremented whenever a new rule is added.
-    return '17';
+    return '18';
   }
 
   protected function resolveFuture($path, Future $future) {
@@ -312,6 +315,7 @@ final class ArcanistXHPASTLinter extends ArcanistBaseXHPASTLinter {
       'lintCallTimePassByReference' => self::LINT_CALL_TIME_PASS_BY_REF,
       'lintFormattedString' => self::LINT_FORMATTED_STRING,
       'lintUnnecessaryFinalModifier' => self::LINT_UNNECESSARY_FINAL_MODIFIER,
+      'lintUnnecessarySemicolons' => self::LINT_UNNECESSARY_SEMICOLON,
     );
 
     foreach ($method_codes as $method => $codes) {
@@ -491,8 +495,8 @@ final class ArcanistXHPASTLinter extends ArcanistBaseXHPASTLinter {
       $name = $node->getConcreteString();
 
       $version = idx($compat_info['functions'], $name, array());
-      $min = idx($version, 'min');
-      $max = idx($version, 'max');
+      $min = idx($version, 'php.min');
+      $max = idx($version, 'php.max');
 
       // Check if whitelisted.
       $whitelisted = false;
@@ -577,8 +581,8 @@ final class ArcanistXHPASTLinter extends ArcanistBaseXHPASTLinter {
       $name = $node->getConcreteString();
       $version = idx($compat_info['interfaces'], $name, array());
       $version = idx($compat_info['classes'], $name, $version);
-      $min = idx($version, 'min');
-      $max = idx($version, 'max');
+      $min = idx($version, 'php.min');
+      $max = idx($version, 'php.max');
         // Check if whitelisted.
         $whitelisted = false;
         foreach (idx($whitelist['class'], $name, array()) as $range) {
@@ -625,8 +629,8 @@ final class ArcanistXHPASTLinter extends ArcanistBaseXHPASTLinter {
     foreach ($constants as $node) {
       $name = $node->getConcreteString();
       $version = idx($compat_info['constants'], $name, array());
-      $min = idx($version, 'min');
-      $max = idx($version, 'max');
+      $min = idx($version, 'php.min');
+      $max = idx($version, 'php.max');
 
       if ($min && version_compare($min, $this->version, '>')) {
         $this->raiseLintAtNode(
@@ -2947,11 +2951,23 @@ final class ArcanistXHPASTLinter extends ArcanistBaseXHPASTLinter {
           continue;
         }
 
-        $this->raiseLintAtNode(
-          $value,
+        list($before, $after) = $value->getSurroundingNonsemanticTokens();
+        $after = implode('', mpull($after, 'getValue'));
+
+        $original = $value->getConcreteString();
+        $replacement = $value->getConcreteString().',';
+
+        if (strpos($after, "\n") === false) {
+          $original    .= $after;
+          $replacement .= rtrim($after)."\n".$array->getIndentation();
+        }
+
+        $this->raiseLintAtOffset(
+          $value->getOffset(),
           self::LINT_ARRAY_SEPARATOR,
           pht('Multi-lined arrays should have trailing commas.'),
-          $value->getConcreteString().',');
+          $original,
+          $replacement);
       } else if (!$multiline && $after && $after->getValue() == ',') {
         $this->raiseLintAtToken(
           $after,
@@ -3225,6 +3241,24 @@ final class ArcanistXHPASTLinter extends ArcanistBaseXHPASTLinter {
                 'final'));
           }
         }
+      }
+    }
+  }
+
+  private function lintUnnecessarySemicolons(XHPASTNode $root) {
+    $statements = $root->selectDescendantsOfType('n_STATEMENT');
+
+    foreach ($statements as $statement) {
+      if ($statement->getParentNode()->getTypeName() == 'n_DECLARE') {
+        continue;
+      }
+
+      if ($statement->getSemanticString() == ';') {
+        $this->raiseLintAtNode(
+          $statement,
+          self::LINT_UNNECESSARY_SEMICOLON,
+          pht('Unnecessary semicolons after statement.'),
+          '');
       }
     }
   }
