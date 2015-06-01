@@ -16,8 +16,9 @@ abstract class ArcanistLinter {
   const GRANULARITY_GLOBAL = 4;
 
   private $id;
-  protected $paths  = array();
-  protected $data   = array();
+  protected $paths = array();
+  private $filteredPaths = null;
+  protected $data = array();
   protected $engine;
   protected $activePath;
   protected $messages = array();
@@ -247,6 +248,24 @@ abstract class ArcanistLinter {
     return $this;
   }
 
+  final public function getProjectRoot() {
+    $engine = $this->getEngine();
+    if (!$engine) {
+      throw new Exception(
+        pht(
+          'You must call %s before you can call %s.',
+          'setEngine()',
+          __FUNCTION__.'()'));
+    }
+
+    $working_copy = $engine->getWorkingCopy();
+    if (!$working_copy) {
+      return null;
+    }
+
+    return $working_copy->getProjectRoot();
+  }
+
   final public function getOtherLocation($offset, $path = null) {
     if ($path === null) {
       $path = $this->getActivePath();
@@ -274,19 +293,24 @@ abstract class ArcanistLinter {
 
   final public function addPath($path) {
     $this->paths[$path] = $path;
+    $this->filteredPaths = null;
     return $this;
   }
 
   final public function setPaths(array $paths) {
     $this->paths = $paths;
+    $this->filteredPaths = null;
     return $this;
   }
 
   /**
    * Filter out paths which this linter doesn't act on (for example, because
    * they are binaries and the linter doesn't apply to binaries).
+   *
+   * @param  list<string>
+   * @return list<string>
    */
-  final private function filterPaths($paths) {
+  final private function filterPaths(array $paths) {
     $engine = $this->getEngine();
 
     $keep = array();
@@ -314,7 +338,11 @@ abstract class ArcanistLinter {
   }
 
   final public function getPaths() {
-    return $this->filterPaths(array_values($this->paths));
+    if ($this->filteredPaths === null) {
+      $this->filteredPaths = $this->filterPaths(array_values($this->paths));
+    }
+
+    return $this->filteredPaths;
   }
 
   final public function addData($path, $data) {
@@ -372,15 +400,14 @@ abstract class ArcanistLinter {
     if (isset($map[$code])) {
       return $map[$code];
     }
-    return 'Unknown lint message!';
+    return pht('Unknown lint message!');
   }
 
   final protected function addLintMessage(ArcanistLintMessage $message) {
-    if (!$this->getEngine()->getCommitHookMode()) {
-      $root = $this->getEngine()->getWorkingCopy()->getProjectRoot();
-      $path = Filesystem::resolvePath($message->getPath(), $root);
-      $message->setPath(Filesystem::readablePath($path, $root));
-    }
+    $root = $this->getProjectRoot();
+    $path = Filesystem::resolvePath($message->getPath(), $root);
+    $message->setPath(Filesystem::readablePath($path, $root));
+
     $this->messages[] = $message;
     return $message;
   }
@@ -389,7 +416,7 @@ abstract class ArcanistLinter {
     return $this->messages;
   }
 
-  final protected function raiseLintAtLine(
+  final public function raiseLintAtLine(
     $line,
     $char,
     $code,
@@ -411,11 +438,11 @@ abstract class ArcanistLinter {
     return $this->addLintMessage($message);
   }
 
-  final protected function raiseLintAtPath($code, $desc) {
+  final public function raiseLintAtPath($code, $desc) {
     return $this->raiseLintAtLine(null, null, $code, $desc, null, null);
   }
 
-  final protected function raiseLintAtOffset(
+  final public function raiseLintAtOffset(
     $offset,
     $code,
     $desc,
@@ -502,10 +529,10 @@ abstract class ArcanistLinter {
 
   public function setLinterConfigurationValue($key, $value) {
     $sev_map = array(
-      'error' => ArcanistLintSeverity::SEVERITY_ERROR,
-      'warning' => ArcanistLintSeverity::SEVERITY_WARNING,
-      'autofix' => ArcanistLintSeverity::SEVERITY_AUTOFIX,
-      'advice' => ArcanistLintSeverity::SEVERITY_ADVICE,
+      'error'    => ArcanistLintSeverity::SEVERITY_ERROR,
+      'warning'  => ArcanistLintSeverity::SEVERITY_WARNING,
+      'autofix'  => ArcanistLintSeverity::SEVERITY_AUTOFIX,
+      'advice'   => ArcanistLintSeverity::SEVERITY_ADVICE,
       'disabled' => ArcanistLintSeverity::SEVERITY_DISABLED,
     );
 
@@ -557,7 +584,7 @@ abstract class ArcanistLinter {
         return;
     }
 
-    throw new Exception("Incomplete implementation: {$key}!");
+    throw new Exception(pht('Incomplete implementation: %s!', $key));
   }
 
   protected function canCustomizeLintSeverities() {
@@ -592,49 +619,6 @@ abstract class ArcanistLinter {
    */
   protected function getLintCodeFromLinterConfigurationKey($code) {
     return $code;
-  }
-
-  /**
-   * Retrieve an old lint configuration value from `.arcconfig` or a similar
-   * source.
-   *
-   * Modern linters should use @{method:getConfig} to read configuration from
-   * `.arclint`.
-   *
-   * @param   string  Configuration key to retrieve.
-   * @param   wild    Default value to return if key is not present in config.
-   * @return  wild    Configured value, or default if no configuration exists.
-   */
-  final protected function getDeprecatedConfiguration($key, $default = null) {
-    // If we're being called in a context without an engine (probably from
-    // `arc linters`), just return the default value.
-    if (!$this->engine) {
-      return $default;
-    }
-
-    $config = $this->getEngine()->getConfigurationManager();
-
-    // Construct a sentinel object so we can tell if we're reading config
-    // or not.
-    $sentinel = (object)array();
-    $result = $config->getConfigFromAnySource($key, $sentinel);
-
-    // If we read config, warn the user that this mechanism is deprecated and
-    // discouraged.
-    if ($result !== $sentinel) {
-      $console = PhutilConsole::getConsole();
-      $console->writeErr(
-        "**%s**: %s\n",
-        pht('Deprecation Warning'),
-        pht(
-          'Configuration option "%s" is deprecated. Generally, linters should '.
-          'now be configured using an `.arclint` file. See "Arcanist User '.
-          'Guide: Lint" in the documentation for more information.',
-          $key));
-      return $result;
-    }
-
-    return $default;
   }
 
 }

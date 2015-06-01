@@ -6,7 +6,7 @@
 final class ArcanistClosureLinter extends ArcanistExternalLinter {
 
   public function getInfoName() {
-    return 'Closure Linter';
+    return pht('Closure Linter');
   }
 
   public function getInfoURI() {
@@ -35,10 +35,6 @@ final class ArcanistClosureLinter extends ArcanistExternalLinter {
       'gjslint',
       'sudo easy_install http://closure-linter.googlecode.com/'.
       'files/closure_linter-latest.tar.gz');
-  }
-
-  public function supportsReadDataFromStdin() {
-    return false;
   }
 
   protected function parseLinterOutput($path, $err, $stdout, $stderr) {

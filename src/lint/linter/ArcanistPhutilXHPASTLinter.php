@@ -21,44 +21,16 @@ final class ArcanistPhutilXHPASTLinter extends ArcanistBaseXHPASTLinter {
       'linter is intended for use in Phabricator libraries and extensions.');
   }
 
-  public function setDeprecatedFunctions(array $map) {
-    $this->deprecatedFunctions = $map;
-    return $this;
-  }
-
-  public function setDynamicStringFunctions(array $map) {
-    $this->dynamicStringFunctions = $map;
-    return $this;
-  }
-
-  public function setDynamicStringClasses(array $map) {
-    $this->dynamicStringClasses = $map;
-    return $this;
-  }
-
   public function getLintNameMap() {
     return array(
       self::LINT_ARRAY_COMBINE          => pht(
-        '%s Unreliable',
-        'array_combine()'),
+        '%s Unreliable', 'array_combine()'),
       self::LINT_DEPRECATED_FUNCTION    => pht(
         'Use of Deprecated Function'),
       self::LINT_UNSAFE_DYNAMIC_STRING  => pht(
         'Unsafe Usage of Dynamic String'),
       self::LINT_RAGGED_CLASSTREE_EDGE  => pht(
-        'Class Not %s Or %s',
-        'abstract',
-        'final'),
-    );
-  }
-
-  public function getLintSeverityMap() {
-    $warning = ArcanistLintSeverity::SEVERITY_WARNING;
-    return array(
-      self::LINT_ARRAY_COMBINE          => $warning,
-      self::LINT_DEPRECATED_FUNCTION    => $warning,
-      self::LINT_UNSAFE_DYNAMIC_STRING  => $warning,
-      self::LINT_RAGGED_CLASSTREE_EDGE  => $warning,
+        'Class Not %s Or %s', 'abstract', 'final'),
     );
   }
 
@@ -70,9 +42,15 @@ final class ArcanistPhutilXHPASTLinter extends ArcanistBaseXHPASTLinter {
     return 'phutil-xhpast';
   }
 
-  public function getVersion() {
-    // The version number should be incremented whenever a new rule is added.
-    return '3';
+  public function getLintSeverityMap() {
+    $warning = ArcanistLintSeverity::SEVERITY_WARNING;
+
+    return array(
+      self::LINT_ARRAY_COMBINE          => $warning,
+      self::LINT_DEPRECATED_FUNCTION    => $warning,
+      self::LINT_UNSAFE_DYNAMIC_STRING  => $warning,
+      self::LINT_RAGGED_CLASSTREE_EDGE  => $warning,
+    );
   }
 
   public function getLinterConfigurationOptions() {
@@ -110,9 +88,15 @@ final class ArcanistPhutilXHPASTLinter extends ArcanistBaseXHPASTLinter {
       case 'phutil-xhpast.dynamic-string.classes':
         $this->setDynamicStringClasses($value);
         return;
+      default:
+        parent::setLinterConfigurationValue($key, $value);
+        return;
     }
+  }
 
-    return parent::setLinterConfigurationValue($key, $value);
+  public function getVersion() {
+    // The version number should be incremented whenever a new rule is added.
+    return '3';
   }
 
   protected function resolveFuture($path, Future $future) {
@@ -140,6 +124,27 @@ final class ArcanistPhutilXHPASTLinter extends ArcanistBaseXHPASTLinter {
     }
   }
 
+
+/* -(  Setters  )------------------------------------------------------------ */
+
+  public function setDeprecatedFunctions(array $map) {
+    $this->deprecatedFunctions = $map;
+    return $this;
+  }
+
+  public function setDynamicStringClasses(array $map) {
+    $this->dynamicStringClasses = $map;
+    return $this;
+  }
+
+  public function setDynamicStringFunctions(array $map) {
+    $this->dynamicStringFunctions = $map;
+    return $this;
+  }
+
+
+/* -(  Linter Rules  )------------------------------------------------------- */
+
   private function lintUnsafeDynamicString(XHPASTNode $root) {
     $safe = $this->dynamicStringFunctions + array(
       'pht' => 0,
@@ -158,9 +163,7 @@ final class ArcanistPhutilXHPASTLinter extends ArcanistBaseXHPASTLinter {
       'qsprintf' => 1,
       'vqsprintf' => 1,
       'queryfx' => 1,
-      'vqueryfx' => 1,
       'queryfx_all' => 1,
-      'vqueryfx_all' => 1,
       'queryfx_one' => 1,
     );
 
@@ -211,40 +214,42 @@ final class ArcanistPhutilXHPASTLinter extends ArcanistBaseXHPASTLinter {
   }
 
   private function lintArrayCombine(XHPASTNode $root) {
-    $function_calls = $root->selectDescendantsOfType('n_FUNCTION_CALL');
+    $function_calls = $this->getFunctionCalls($root, array('array_combine'));
+
     foreach ($function_calls as $call) {
       $name = $call->getChildByIndex(0)->getConcreteString();
-      if (strcasecmp($name, 'array_combine') == 0) {
-        $parameter_list = $call->getChildOfType(1, 'n_CALL_PARAMETER_LIST');
-        if (count($parameter_list->getChildren()) !== 2) {
-          // Wrong number of parameters, but raise that elsewhere if we want.
-          continue;
-        }
+      $parameter_list = $call->getChildOfType(1, 'n_CALL_PARAMETER_LIST');
 
-        $first = $parameter_list->getChildByIndex(0);
-        $second = $parameter_list->getChildByIndex(1);
+      if (count($parameter_list->getChildren()) !== 2) {
+        // Wrong number of parameters, but raise that elsewhere if we want.
+        continue;
+      }
 
-        if ($first->getConcreteString() == $second->getConcreteString()) {
-          $this->raiseLintAtNode(
-            $call,
-            self::LINT_ARRAY_COMBINE,
-            pht(
-              'Prior to PHP 5.4, `%s` fails when given empty arrays. '.
-              'Prefer to write `%s` as `%s`.',
-              'array_combine()',
-              'array_combine(x, x)',
-              'array_fuse(x)'));
-        }
+      $first  = $parameter_list->getChildByIndex(0);
+      $second = $parameter_list->getChildByIndex(1);
+
+      if ($first->getConcreteString() == $second->getConcreteString()) {
+        $this->raiseLintAtNode(
+          $call,
+          self::LINT_ARRAY_COMBINE,
+          pht(
+            'Prior to PHP 5.4, `%s` fails when given empty arrays. '.
+            'Prefer to write `%s` as `%s`.',
+            'array_combine()',
+            'array_combine(x, x)',
+            'array_fuse(x)'));
       }
     }
   }
 
   private function lintDeprecatedFunctions(XHPASTNode $root) {
     $map = $this->deprecatedFunctions;
+    $function_calls = $this->getFunctionCalls($root, array_keys($map));
 
-    $function_calls = $root->selectDescendantsOfType('n_FUNCTION_CALL');
     foreach ($function_calls as $call) {
-      $name = $call->getChildByIndex(0)->getConcreteString();
+      $name = $call
+        ->getChildByIndex(0)
+        ->getConcreteString();
 
       $name = strtolower($name);
       if (empty($map[$name])) {

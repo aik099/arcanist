@@ -55,10 +55,6 @@ final class ArcanistPhpLinter extends ArcanistExternalLinter {
     return $stdout;
   }
 
-  public function supportsReadDataFromStdin() {
-    return false;
-  }
-
   protected function canCustomizeLintSeverities() {
     return false;
   }
@@ -98,7 +94,7 @@ final class ArcanistPhpLinter extends ArcanistExternalLinter {
         return self::LINT_FATAL_ERROR;
 
       default:
-        throw new Exception(pht('Unrecognized lint message code "%s"', $code));
+        throw new Exception(pht('Unrecognized lint message code: "%s"', $code));
     }
   }
 
