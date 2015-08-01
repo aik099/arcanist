@@ -32,8 +32,6 @@
  * @task  conduit   Conduit
  * @task  scratch   Scratch Files
  * @task  phabrep   Phabricator Repositories
- *
- * @stable
  */
 abstract class ArcanistWorkflow extends Phobject {
 
@@ -55,8 +53,8 @@ abstract class ArcanistWorkflow extends Phobject {
   private $repositoryAPI;
   private $configurationManager;
   private $workingCopy;
-  private $arguments;
-  private $passedArguments;
+  private $arguments = array();
+  private $passedArguments = array();
   private $command;
 
   private $stashed;
@@ -1619,8 +1617,8 @@ abstract class ArcanistWorkflow extends Phobject {
           pht(
             'This feature requires a newer version of Phabricator. Please '.
             'update it using these instructions: %s',
-            'http://www.phabricator.com/docs/phabricator/article/'.
-            'Installation_Guide.html#updating-phabricator'));
+            'https://secure.phabricator.com/book/phabricator/article/'.
+              'upgrading/'));
       }
       throw $ex;
     }
