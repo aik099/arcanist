@@ -469,6 +469,7 @@ EOTEXT
       $propset = array();
       $adds = array();
       $symlinks = array();
+      $binaries = array();
 
       $changes = $bundle->getChanges();
       foreach ($changes as $change) {
@@ -480,6 +481,11 @@ EOTEXT
           case ArcanistDiffChangeType::FILE_SYMLINK:
             $should_patch = false;
             $symlinks[] = $change;
+            break;
+
+          case ArcanistDiffChangeType::FILE_BINARY:
+          case ArcanistDiffChangeType::FILE_IMAGE:
+            $binaries[] = $change;
             break;
         }
 
@@ -624,6 +630,13 @@ EOTEXT
         if ($err) {
           $patch_err = max($patch_err, $err);
         }
+      }
+
+      foreach ($binaries as $binary) {
+        $binary_file = $binary->getCurrentPath();
+        $binary_phid = $binary->getMetadata('new:binary-phid');
+        $binary_data = $this->getBlob($binary_phid, $binary_file);
+        Filesystem::writeFile($binary_file, $binary_data);
       }
 
       foreach ($adds as $add) {
@@ -833,6 +846,21 @@ EOTEXT
     }
 
     return 0;
+  }
+
+  private function getBlob($phid, $name) {
+    $console = PhutilConsole::getConsole();
+    $console->writeErr(
+      "%s\n",
+      pht("Downloading binary data for '%s'...", $name));
+
+    $data_base64 = $this->getConduit()->callMethodSynchronous(
+      'file.download',
+      array(
+        'phid' => $phid,
+      ));
+
+    return base64_decode($data_base64);
   }
 
   private function getCommitMessage(ArcanistBundle $bundle) {
