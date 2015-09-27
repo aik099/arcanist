@@ -116,13 +116,23 @@ final class ArcanistFileUploader extends Phobject {
     $conduit = $this->conduit;
     $futures = array();
     foreach ($files as $key => $file) {
-      $futures[$key] = $conduit->callMethod(
-        'file.allocate',
-        array(
-          'name' => $file->getName(),
-          'contentLength' => $file->getByteSize(),
-          'contentHash' => $file->getContentHash(),
-        ));
+      $params = array(
+        'name' => $file->getName(),
+        'contentLength' => $file->getByteSize(),
+        'contentHash' => $file->getContentHash(),
+      );
+
+      $delete_after = $file->getDeleteAfterEpoch();
+      if ($delete_after !== null) {
+        $params['deleteAfterEpoch'] = $delete_after;
+      }
+
+      $view_policy = $file->getViewPolicy();
+      if ($view_policy !== null) {
+        $params['viewPolicy'] = $view_policy;
+      }
+
+      $futures[$key] = $conduit->callMethod('file.allocate', $params);
     }
 
     $iterator = id(new FutureIterator($futures))->limit(4);

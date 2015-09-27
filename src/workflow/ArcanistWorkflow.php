@@ -893,11 +893,47 @@ abstract class ArcanistWorkflow extends Phobject {
           implode("\n    ", $missing)));
     }
 
+    $externals = $api->getDirtyExternalChanges();
+
+    // TODO: This state can exist in Subversion, but it is currently handled
+    // elsewhere. It should probably be handled here, eventually.
+    if ($api instanceof ArcanistSubversionAPI) {
+      $externals = array();
+    }
+
+    if ($externals) {
+      $message = pht(
+        '%s submodule(s) have uncommitted or untracked changes:',
+        new PhutilNumber(count($externals)));
+
+      $prompt = pht(
+        'Ignore the changes to these %s submodule(s) and continue?',
+        new PhutilNumber(count($externals)));
+
+      $list = id(new PhutilConsoleList())
+        ->setWrap(false)
+        ->addItems($externals);
+
+      id(new PhutilConsoleBlock())
+        ->addParagraph($message)
+        ->addList($list)
+        ->draw();
+
+      $ok = phutil_console_confirm($prompt, $default_no = false);
+      if (!$ok) {
+        throw new ArcanistUserAbortException();
+      }
+    }
+
     $uncommitted = $api->getUncommittedChanges();
     $unstaged = $api->getUnstagedChanges();
 
+    // We already dealt with externals.
+    $unstaged = array_diff($unstaged, $externals);
+
     // We only want files which are purely uncommitted.
     $uncommitted = array_diff($uncommitted, $unstaged);
+    $uncommitted = array_diff($uncommitted, $externals);
 
     $untracked = $api->getUntrackedChanges();
     if (!$this->shouldRequireCleanUntrackedFiles()) {
@@ -1613,12 +1649,11 @@ abstract class ArcanistWorkflow extends Phobject {
     } catch (ConduitClientException $ex) {
       if ($ex->getErrorCode() == 'ERR-CONDUIT-CALL') {
         echo phutil_console_wrap(
-          "%s\n\n",
           pht(
             'This feature requires a newer version of Phabricator. Please '.
             'update it using these instructions: %s',
             'https://secure.phabricator.com/book/phabricator/article/'.
-              'upgrading/'));
+              'upgrading/')."\n\n");
       }
       throw $ex;
     }
@@ -1905,6 +1940,59 @@ abstract class ArcanistWorkflow extends Phobject {
 
     return $engine;
   }
+
+  /**
+   * Build a new unit test engine for the current working copy.
+   *
+   * Optionally, you can pass an explicit engine class name to build an engine
+   * of a particular class. Normally this is used to implement an `--engine`
+   * flag from the CLI.
+   *
+   * @param string Optional explicit engine class name.
+   * @return ArcanistUnitTestEngine Constructed engine.
+   */
+  protected function newUnitTestEngine($engine_class = null) {
+    $working_copy = $this->getWorkingCopy();
+    $config = $this->getConfigurationManager();
+
+    if (!$engine_class) {
+      $engine_class = $config->getConfigFromAnySource('unit.engine');
+    }
+
+    if (!$engine_class) {
+      if (Filesystem::pathExists($working_copy->getProjectPath('.arcunit'))) {
+        $engine_class = 'ArcanistConfigurationDrivenUnitTestEngine';
+      }
+    }
+
+    if (!$engine_class) {
+      throw new ArcanistNoEngineException(
+        pht(
+          "No unit test engine is configured for this project. Create an ".
+          "'%s' file, or configure an advanced engine with '%s' in '%s'.",
+          '.arcunit',
+          'unit.engine',
+          '.arcconfig'));
+    }
+
+    $base_class = 'ArcanistUnitTestEngine';
+    if (!class_exists($engine_class) ||
+        !is_subclass_of($engine_class, $base_class)) {
+      throw new ArcanistUsageException(
+        pht(
+          'Configured unit test engine "%s" is not a subclass of "%s", '.
+          'but must be.',
+          $engine_class,
+          $base_class));
+    }
+
+    $engine = newv($engine_class, array())
+      ->setWorkingCopy($working_copy)
+      ->setConfigurationManager($config);
+
+    return $engine;
+  }
+
 
   protected function openURIsInBrowser(array $uris) {
     $browser = $this->getBrowserCommand();

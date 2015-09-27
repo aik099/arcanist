@@ -90,13 +90,13 @@ function variable_variable() {
 function closure1() {
   $ar = array();
   foreach ($ar as &$a) {}
-  function($a) {
+  function ($a) {
     $a++;
   };
 }
 
 function closure2() {
-  function() {
+  function () {
     $ar = array();
     foreach ($ar as &$a) {}
   };
@@ -104,7 +104,7 @@ function closure2() {
 }
 
 function closure3() {
-  function() {
+  function () {
     $ar = array();
     foreach ($ar as &$a) {}
     $a++; // Reuse of $a
@@ -114,12 +114,11 @@ function closure3() {
 function closure4() {
   $ar = array();
   foreach ($ar as &$a) {}
-  function($a) {
+  function ($a) {
     unset($a);
   };
   $a++; // Reuse of $a
 }
-
 ~~~~~~~~~~
 warning:6:3
 warning:12:8

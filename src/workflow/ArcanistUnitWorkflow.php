@@ -9,7 +9,6 @@ final class ArcanistUnitWorkflow extends ArcanistWorkflow {
   const RESULT_UNSOUND   = 1;
   const RESULT_FAIL      = 2;
   const RESULT_SKIP      = 3;
-  const RESULT_POSTPONED = 4;
 
   private $unresolvedTests;
   private $testResults;
@@ -113,20 +112,7 @@ EOTEXT
   }
 
   public function run() {
-
     $working_copy = $this->getWorkingCopy();
-
-    $engine_class = $this->getArgument(
-      'engine',
-      $this->getConfigurationManager()->getConfigFromAnySource('unit.engine'));
-
-    if (!$engine_class) {
-      throw new ArcanistNoEngineException(
-        pht(
-          'No unit test engine is configured for this project. Edit %s '.
-          'to specify a unit test engine.',
-          '.arcconfig'));
-    }
 
     $paths = $this->getArgument('paths');
     $rev = $this->getArgument('rev');
@@ -145,18 +131,7 @@ EOTEXT
       $paths = $this->selectPathsForWorkflow($paths, $rev);
     }
 
-    if (!class_exists($engine_class) ||
-        !is_subclass_of($engine_class, 'ArcanistUnitTestEngine')) {
-      throw new ArcanistUsageException(
-        pht(
-          "Configured unit test engine '%s' is not a subclass of '%s'.",
-          $engine_class,
-          'ArcanistUnitTestEngine'));
-    }
-
-    $this->engine = newv($engine_class, array());
-    $this->engine->setWorkingCopy($working_copy);
-    $this->engine->setConfigurationManager($this->getConfigurationManager());
+    $this->engine = $this->newUnitTestEngine($this->getArgument('engine'));
     if ($everything) {
       $this->engine->setRunAllTests(true);
     } else {
@@ -199,30 +174,19 @@ EOTEXT
 
     $unresolved = array();
     $coverage = array();
-    $postponed_count = 0;
     foreach ($results as $result) {
       $result_code = $result->getResult();
-      if ($result_code == ArcanistUnitTestResult::RESULT_POSTPONED) {
-        $postponed_count++;
+      if ($this->engine->shouldEchoTestResults()) {
+        $console->writeOut('%s', $renderer->renderUnitResult($result));
+      }
+      if ($result_code != ArcanistUnitTestResult::RESULT_PASS) {
         $unresolved[] = $result;
-      } else {
-        if ($this->engine->shouldEchoTestResults()) {
-          $console->writeOut('%s', $renderer->renderUnitResult($result));
-        }
-        if ($result_code != ArcanistUnitTestResult::RESULT_PASS) {
-          $unresolved[] = $result;
-        }
       }
       if ($result->getCoverage()) {
         foreach ($result->getCoverage() as $file => $report) {
           $coverage[$file][] = $report;
         }
       }
-    }
-    if ($postponed_count) {
-      $console->writeOut(
-        '%s',
-        $renderer->renderPostponedResult($postponed_count));
     }
 
     if ($coverage) {
@@ -276,9 +240,6 @@ EOTEXT
         break;
       } else if ($result_code == ArcanistUnitTestResult::RESULT_UNSOUND) {
         $overall_result = self::RESULT_UNSOUND;
-      } else if ($result_code == ArcanistUnitTestResult::RESULT_POSTPONED &&
-                 $overall_result != self::RESULT_UNSOUND) {
-        $overall_result = self::RESULT_POSTPONED;
       }
     }
 

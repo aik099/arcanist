@@ -10,7 +10,6 @@ final class ArcanistUnitTestResult extends Phobject {
   const RESULT_SKIP         = 'skip';
   const RESULT_BROKEN       = 'broken';
   const RESULT_UNSOUND      = 'unsound';
-  const RESULT_POSTPONED    = 'postponed';
 
   private $namespace;
   private $name;
@@ -129,13 +128,22 @@ final class ArcanistUnitTestResult extends Phobject {
 
     $base = reset($coverage);
     foreach ($coverage as $more_coverage) {
-      $len = min(strlen($base), strlen($more_coverage));
+      $base_len = strlen($base);
+      $more_len = strlen($more_coverage);
+
+      $len = min($base_len, $more_len);
       for ($ii = 0; $ii < $len; $ii++) {
         if ($more_coverage[$ii] == 'C') {
           $base[$ii] = 'C';
         }
       }
+
+      // If a secondary report has more data, copy all of it over.
+      if ($more_len > $base_len) {
+        $base .= substr($more_coverage, $base_len);
+      }
     }
+
     return $base;
   }
 
