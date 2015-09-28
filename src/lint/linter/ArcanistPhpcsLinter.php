@@ -56,7 +56,7 @@ final class ArcanistPhpcsLinter extends ArcanistExternalLinter {
   }
 
   protected function getMandatoryFlags() {
-    $options = array('--report=xml', '-d', 'memory_limit=-1');
+    $options = array('--report=xml');
 
     if ($this->standard) {
       $options[] = '--standard='.$this->standard;
