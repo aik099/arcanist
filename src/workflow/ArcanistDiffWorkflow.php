@@ -536,6 +536,7 @@ EOTEXT
     $this->updateLintDiffProperty();
     $this->updateUnitDiffProperty();
     $this->updateLocalDiffProperty();
+    $this->updateOntoDiffProperty();
     $this->resolveDiffPropertyUpdates();
 
     $output_json = $this->getArgument('json');
@@ -975,7 +976,7 @@ EOTEXT
         'works best for changes which will receive detailed human review, '.
         'and not as well for large automated changes or bulk checkins. '.
         'See %s for information about reviewing big checkins. Continue anyway?',
-        new PhutilNumber(count($changes)),
+        phutil_count($changes),
         'https://secure.phabricator.com/book/phabricator/article/'.
           'differential_large_changes/');
 
@@ -1083,18 +1084,18 @@ EOTEXT
             'contain invalid byte sequences). You can either stop this '.
             'workflow and fix these files, or continue. If you continue, '.
             'these files will be marked as binary.',
-            new PhutilNumber(count($utf8_problems))),
+            phutil_count($utf8_problems)),
           pht(
             "You can learn more about how Phabricator handles character ".
             "encodings (and how to configure encoding settings and detect and ".
             "correct encoding problems) by reading 'User Guide: UTF-8 and ".
             "Character Encoding' in the Phabricator documentation."),
           pht(
-            '%d AFFECTED FILE(S)',
-            count($utf8_problems)));
+            '%s AFFECTED FILE(S)',
+            phutil_count($utf8_problems)));
       $confirm = pht(
         'Do you want to mark these %s file(s) as binary and continue?',
-        new PhutilNumber(count($utf8_problems)));
+        phutil_count($utf8_problems));
 
       echo phutil_console_format(
         "**%s**\n",
@@ -2445,6 +2446,58 @@ EOTEXT
     $this->updateDiffProperty('local:commits', json_encode($local_info));
   }
 
+  private function updateOntoDiffProperty() {
+    $onto = $this->getDiffOntoTargets();
+
+    if (!$onto) {
+      return;
+    }
+
+    $this->updateDiffProperty('arc:onto', json_encode($onto));
+  }
+
+  private function getDiffOntoTargets() {
+    if ($this->isRawDiffSource()) {
+      return null;
+    }
+
+    $api = $this->getRepositoryAPI();
+
+    if (!($api instanceof ArcanistGitAPI)) {
+      return null;
+    }
+
+    // If we track an upstream branch either directly or indirectly, use that.
+    $branch = $api->getBranchName();
+    if (strlen($branch)) {
+      $upstream_path = $api->getPathToUpstream($branch);
+      $remote_branch = $upstream_path->getRemoteBranchName();
+      if (strlen($remote_branch)) {
+        return array(
+          array(
+            'type' => 'branch',
+            'name' => $remote_branch,
+            'kind' => 'upstream',
+          ),
+        );
+      }
+    }
+
+    // If "arc.land.onto.default" is configured, use that.
+    $config_key = 'arc.land.onto.default';
+    $onto = $this->getConfigFromAnySource($config_key);
+    if (strlen($onto)) {
+      return array(
+        array(
+          'type' => 'branch',
+          'name' => $onto,
+          'kind' => 'arc.land.onto.default',
+        ),
+      );
+    }
+
+    return null;
+  }
 
   /**
    * Update an arbitrary diff property.
@@ -2792,15 +2845,7 @@ EOTEXT
         $unit[$key] = $this->getModernUnitDictionary($message);
       }
 
-      switch ($unit_result) {
-        case ArcanistUnitWorkflow::RESULT_OKAY:
-        case ArcanistUnitWorkflow::RESULT_SKIP:
-          $type = 'pass';
-          break;
-        default:
-          $type = 'fail';
-          break;
-      }
+      $type = ArcanistUnitWorkflow::getHarbormasterTypeFromResult($unit_result);
 
       $futures[] = $this->getConduit()->callMethod(
         'harbormaster.sendmessage',
@@ -2822,25 +2867,6 @@ EOTEXT
       phlog($ex);
       return false;
     }
-  }
-
-  private function getModernLintDictionary(array $map) {
-    $map = $this->getModernCommonDictionary($map);
-    return $map;
-  }
-
-  private function getModernUnitDictionary(array $map) {
-    $map = $this->getModernCommonDictionary($map);
-    return $map;
-  }
-
-  private function getModernCommonDictionary(array $map) {
-    foreach ($map as $key => $value) {
-      if ($value === null) {
-        unset($map[$key]);
-      }
-    }
-    return $map;
   }
 
 }

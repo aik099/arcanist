@@ -521,6 +521,16 @@ final class ArcanistGitAPI extends ArcanistRepositoryAPI {
   }
 
   public function getRemoteURI() {
+    // Determine which remote to examine; default to 'origin'
+    $remote = 'origin';
+    $branch = $this->getBranchName();
+    if ($branch) {
+      $path = $this->getPathToUpstream($branch);
+      if ($path->isConnectedToRemote()) {
+        $remote = $path->getRemoteRemoteName();
+      }
+    }
+
     // "git ls-remote --get-url" is the appropriate plumbing to get the remote
     // URI. "git config remote.origin.url", on the other hand, may not be as
     // accurate (for example, it does not take into account possible URL
@@ -528,9 +538,9 @@ final class ArcanistGitAPI extends ArcanistRepositoryAPI {
     // the --get-url flag requires git 1.7.5.
     $version = $this->getGitVersion();
     if (version_compare($version, '1.7.5', '>=')) {
-      list($stdout) = $this->execxLocal('ls-remote --get-url origin');
+      list($stdout) = $this->execxLocal('ls-remote --get-url %s', $remote);
     } else {
-      list($stdout) = $this->execxLocal('config remote.origin.url');
+      list($stdout) = $this->execxLocal('config %s', "remote.{$remote}.url");
     }
 
     $uri = rtrim($stdout);
@@ -1206,8 +1216,20 @@ final class ArcanistGitAPI extends ArcanistRepositoryAPI {
             // Ideally, we would use something like "for-each-ref --contains"
             // to get a filtered list of branches ready for script consumption.
             // Instead, try to get predictable output from "branch --contains".
+
+            $flags = array();
+            $flags[] = '--no-color';
+
+            // NOTE: The "--no-column" flag was introduced in Git 1.7.11, so
+            // don't pass it if we're running an older version. See T9953.
+            $version = $this->getGitVersion();
+            if (version_compare($version, '1.7.11', '>=')) {
+              $flags[] = '--no-column';
+            }
+
             list($branches) = $this->execxLocal(
-              '-c column.ui=never -c color.ui=never branch --contains %s',
+              'branch %Ls --contains %s',
+              $flags,
               $commit);
             $branches = array_filter(explode("\n", $branches));
 
@@ -1331,6 +1353,77 @@ final class ArcanistGitAPI extends ArcanistRepositoryAPI {
   protected function didReloadCommitRange() {
     // After an amend, the symbolic head may resolve to a different commit.
     $this->resolvedHeadCommit = null;
+  }
+
+  /**
+   * Follow the chain of tracking branches upstream until we reach a remote
+   * or cycle locally.
+   *
+   * @param string Ref to start from.
+   * @return list<wild> Path to an upstream.
+   */
+  public function getPathToUpstream($start) {
+    $cursor = $start;
+    $path = new ArcanistGitUpstreamPath();
+    while (true) {
+      list($err, $upstream) = $this->execManualLocal(
+        'rev-parse --symbolic-full-name %s@{upstream}',
+        $cursor);
+
+      if ($err) {
+        // We ended up somewhere with no tracking branch, so we're done.
+        break;
+      }
+
+      $upstream = trim($upstream);
+
+      if (preg_match('(^refs/heads/)', $upstream)) {
+        $upstream = preg_replace('(^refs/heads/)', '', $upstream);
+
+        $is_cycle = $path->getUpstream($upstream);
+
+        $path->addUpstream(
+          $cursor,
+          array(
+            'type' => ArcanistGitUpstreamPath::TYPE_LOCAL,
+            'name' => $upstream,
+            'cycle' => $is_cycle,
+          ));
+
+        if ($is_cycle) {
+          // We ran into a local cycle, so we're done.
+          break;
+        }
+
+        // We found another local branch, so follow that one upriver.
+        $cursor = $upstream;
+        continue;
+      }
+
+      if (preg_match('(^refs/remotes/)', $upstream)) {
+        $upstream = preg_replace('(^refs/remotes/)', '', $upstream);
+        list($remote, $branch) = explode('/', $upstream, 2);
+
+        $path->addUpstream(
+          $cursor,
+          array(
+            'type' => ArcanistGitUpstreamPath::TYPE_REMOTE,
+            'name' => $branch,
+            'remote' => $remote,
+          ));
+
+        // We found a remote, so we're done.
+        break;
+      }
+
+      throw new Exception(
+        pht(
+          'Got unrecognized upstream format ("%s") from Git, expected '.
+          '"refs/heads/..." or "refs/remotes/...".',
+          $upstream));
+    }
+
+    return $path;
   }
 
 }
