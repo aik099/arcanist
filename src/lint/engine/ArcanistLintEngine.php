@@ -96,9 +96,21 @@ abstract class ArcanistLintEngine extends Phobject {
     if ($changed === null) {
       $this->changedLines[$path] = null;
     } else {
-      $this->changedLines[$path] = array_fill_keys($changed, true);
+      $this->changedLines[$path] = $this->increaseFuzzFactor(
+        array_fill_keys($changed, true));
     }
     return $this;
+  }
+
+  final private function increaseFuzzFactor(array $changed_lines) {
+    $new_changed_lines = $changed_lines;
+
+    foreach (array_keys($changed_lines) as $changed_line) {
+      $new_changed_lines[$changed_line - 1] = true;
+      $new_changed_lines[$changed_line + 1] = true;
+    }
+
+    return $new_changed_lines;
   }
 
   final public function getPathChangedLines($path) {
