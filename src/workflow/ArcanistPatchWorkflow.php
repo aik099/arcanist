@@ -561,7 +561,14 @@ EOTEXT
           $props = $prop_old + $prop_new;
           foreach ($props as $key => $ignored) {
             if (idx($prop_old, $key) !== idx($prop_new, $key)) {
-              $propset[$change->getCurrentPath()][$key] = idx($prop_new, $key);
+              // Compensates SVN 1.8 patch format change for property values.
+              $new_property_value = preg_replace(
+                '/\n\\\\ No newline at end of property$/',
+                '',
+                idx($prop_new, $key)
+              );
+
+              $propset[$change->getCurrentPath()][$key] = $new_property_value;
             }
           }
         }
