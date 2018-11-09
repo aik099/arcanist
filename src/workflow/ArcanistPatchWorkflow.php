@@ -471,6 +471,12 @@ EOTEXT
       $symlinks = array();
       $binaries = array();
 
+      $delete_types = array(
+        ArcanistDiffChangeType::TYPE_MOVE_AWAY,
+        ArcanistDiffChangeType::TYPE_MULTICOPY,
+        ArcanistDiffChangeType::TYPE_DELETE,
+      );
+
       $changes = $bundle->getChanges();
       foreach ($changes as $change) {
         $type = $change->getType();
@@ -485,7 +491,9 @@ EOTEXT
 
           case ArcanistDiffChangeType::FILE_BINARY:
           case ArcanistDiffChangeType::FILE_IMAGE:
-            $binaries[] = $change;
+            if (!in_array($type, $delete_types)) {
+              $binaries[] = $change;
+            }
             break;
         }
 
