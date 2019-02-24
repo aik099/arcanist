@@ -979,22 +979,6 @@ EOTEXT
       throw new Exception(pht('Repository API is not supported.'));
     }
 
-    if (count($changes) > 250) {
-      $message = pht(
-        'This diff has a very large number of changes (%s). Differential '.
-        'works best for changes which will receive detailed human review, '.
-        'and not as well for large automated changes or bulk checkins. '.
-        'See %s for information about reviewing big checkins. Continue anyway?',
-        phutil_count($changes),
-        'https://secure.phabricator.com/book/phabricator/article/'.
-          'differential_large_changes/');
-
-      if (!phutil_console_confirm($message)) {
-        throw new ArcanistUsageException(
-          pht('Aborted generation of gigantic diff.'));
-      }
-    }
-
     $limit = 1024 * 1024 * 4;
     foreach ($changes as $change) {
       $size = 0;
@@ -1368,7 +1352,7 @@ EOTEXT
                 'Unit testing raised errors, but all '.
                 'failing tests are unsound.'));
           } else {
-            $continue = $this->console->confirm(
+            $continue = phutil_console_confirm(
               pht(
                 'Unit test results included failures, but all failing tests '.
                 'are known to be unsound. Ignore unsound test failures?'));
@@ -1870,17 +1854,56 @@ EOTEXT
           $this->checkRevisionOwnership(head($result));
           break;
         case 'reviewers':
-          $untils = array();
+          $away = array();
           foreach ($result as $user) {
-            if (idx($user, 'currentStatus') == 'away') {
-              $untils[] = $user['currentStatusUntil'];
+            if (idx($user, 'currentStatus') != 'away') {
+              continue;
             }
+
+            $username = $user['userName'];
+            $real_name = $user['realName'];
+
+            if (strlen($real_name)) {
+              $name = pht('%s (%s)', $username, $real_name);
+            } else {
+              $name = pht('%s', $username);
+            }
+
+            $away[] = array(
+              'name' => $name,
+              'until' => $user['currentStatusUntil'],
+            );
           }
-          if (count($untils) == count($reviewers)) {
-            $until = date('l, M j Y', min($untils));
-            $confirm = pht(
-              'All reviewers are away until %s. Continue anyway?',
-              $until);
+
+          if ($away) {
+            if (count($away) == count($reviewers)) {
+              $earliest_return = min(ipull($away, 'until'));
+
+              $message = pht(
+                'All reviewers are away until %s:',
+                date('l, M j Y', $earliest_return));
+            } else {
+              $message = pht('Some reviewers are currently away:');
+            }
+
+            echo tsprintf(
+              "%s\n\n",
+              $message);
+
+            $list = id(new PhutilConsoleList());
+            foreach ($away as $spec) {
+              $list->addItem(
+                pht(
+                  '%s (until %s)',
+                  $spec['name'],
+                  date('l, M j Y', $spec['until'])));
+            }
+
+            echo tsprintf(
+              '%B',
+              $list->drawConsoleString());
+
+            $confirm = pht('Continue even though reviewers are unavailable?');
             if (!phutil_console_confirm($confirm)) {
               throw new ArcanistUsageException(
                 pht('Specify available reviewers and retry.'));

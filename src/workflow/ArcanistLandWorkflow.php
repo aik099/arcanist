@@ -17,7 +17,6 @@ final class ArcanistLandWorkflow extends ArcanistWorkflow {
   private $remote;
   private $useSquash;
   private $keepBranch;
-  private $shouldUpdateWithRebase;
   private $branchType;
   private $ontoType;
   private $preview;
@@ -197,43 +196,8 @@ EOTEXT
         'conflicts' => array(
           'keep-branch' => true,
         ),
-      ),
-      'update-with-rebase' => array(
-        'help' => pht(
-          "When updating the feature branch, use rebase instead of merge. ".
-          "This might make things work better in some cases. Set ".
-          "%s to '%s' to make this the default.",
-          'arc.land.update.default',
-          'rebase'),
-        'conflicts' => array(
-          'merge' => pht(
-            'The %s strategy does not update the feature branch.',
-            '--merge'),
-          'update-with-merge' => pht(
-            'Cannot be used with %s.',
-            '--update-with-merge'),
-        ),
         'supports' => array(
-          'git',
-        ),
-      ),
-      'update-with-merge' => array(
-        'help' => pht(
-          "When updating the feature branch, use merge instead of rebase. ".
-          "This is the default behavior. Setting %s to '%s' can also be ".
-          "used to make this the default.",
-          'arc.land.update.default',
-          'merge'),
-        'conflicts' => array(
-          'merge' => pht(
-            'The %s strategy does not update the feature branch.',
-            '--merge'),
-          'update-with-rebase' => pht(
-            'Cannot be used with %s.',
-            '--update-with-rebase'),
-        ),
-        'supports' => array(
-          'git',
+          'hg',
         ),
       ),
       'revision' => array(
@@ -261,22 +225,6 @@ EOTEXT
 
     if ($engine) {
       $this->readEngineArguments();
-
-      $obsolete = array(
-        'delete-remote',
-        'update-with-merge',
-        'update-with-rebase',
-      );
-
-      foreach ($obsolete as $flag) {
-        if ($this->getArgument($flag)) {
-          throw new ArcanistUsageException(
-            pht(
-              'Flag "%s" is no longer supported under Git.',
-              '--'.$flag));
-        }
-      }
-
       $this->requireCleanWorkingCopy();
 
       $should_hold = $this->getArgument('hold');
@@ -496,7 +444,7 @@ EOTEXT
     $branch = $this->getArgument('branch');
     if (empty($branch)) {
       $branch = $this->getBranchOrBookmark();
-      if ($branch) {
+      if ($branch !== null) {
         $this->branchType = $this->getBranchType($branch);
 
         // TODO: This message is misleading when landing a detached head or
@@ -513,14 +461,6 @@ EOTEXT
     }
     $this->branch = head($branch);
     $this->keepBranch = $this->getArgument('keep-branch');
-
-    $update_strategy = $this->getConfigFromAnySource('arc.land.update.default');
-    $this->shouldUpdateWithRebase = $update_strategy == 'rebase';
-    if ($this->getArgument('update-with-rebase')) {
-      $this->shouldUpdateWithRebase = true;
-    } else if ($this->getArgument('update-with-merge')) {
-      $this->shouldUpdateWithRebase = false;
-    }
 
     $this->preview = $this->getArgument('preview');
 
@@ -754,6 +694,8 @@ EOTEXT
     $rev_title = $this->revision['title'];
     $rev_auxiliary = idx($this->revision, 'auxiliary', array());
 
+    $full_name = pht('D%d: %s', $rev_id, $rev_title);
+
     if ($this->revision['authorPHID'] != $this->getUserPHID()) {
       $other_author = $this->getConduit()->callMethodSynchronous(
         'user.query',
@@ -766,17 +708,46 @@ EOTEXT
         "This %s has revision '%s' but you are not the author. Land this ".
         "revision by %s?",
         $this->branchType,
-        "D{$rev_id}: {$rev_title}",
+        $full_name,
         $other_author));
       if (!$ok) {
         throw new ArcanistUserAbortException();
       }
     }
 
-    if ($rev_status != ArcanistDifferentialRevisionStatus::ACCEPTED) {
-      $ok = phutil_console_confirm(pht(
-        "Revision '%s' has not been accepted. Continue anyway?",
-        "D{$rev_id}: {$rev_title}"));
+    $state_warning = null;
+    $state_header = null;
+    if ($rev_status == ArcanistDifferentialRevisionStatus::CHANGES_PLANNED) {
+      $state_header = pht('REVISION HAS CHANGES PLANNED');
+      $state_warning = pht(
+        'The revision you are landing ("%s") is currently in the "%s" state, '.
+        'indicating that you expect to revise it before moving forward.'.
+        "\n\n".
+        'Normally, you should resubmit it for review and wait until it is '.
+        '"%s" by reviewers before you continue.'.
+        "\n\n".
+        'To resubmit the revision for review, either: update the revision '.
+        'with revised changes; or use "Request Review" from the web interface.',
+        $full_name,
+        pht('Changes Planned'),
+        pht('Accepted'));
+    } else if ($rev_status != ArcanistDifferentialRevisionStatus::ACCEPTED) {
+      $state_header = pht('REVISION HAS NOT BEEN ACCEPTED');
+      $state_warning = pht(
+        'The revision you are landing ("%s") has not been "%s" by reviewers.',
+        $full_name,
+        pht('Accepted'));
+    }
+
+    if ($state_warning !== null) {
+      $prompt = pht('Land revision in the wrong state?');
+
+      id(new PhutilConsoleBlock())
+        ->addParagraph(tsprintf('<bg:yellow>** %s **</bg>', $state_header))
+        ->addParagraph(tsprintf('%B', $state_warning))
+        ->draw();
+
+      $ok = phutil_console_confirm($prompt);
       if (!$ok) {
         throw new ArcanistUserAbortException();
       }
@@ -951,42 +922,7 @@ EOTEXT
     $repository_api = $this->getRepositoryAPI();
 
     chdir($repository_api->getPath());
-    if ($this->isGit) {
-      if ($this->shouldUpdateWithRebase) {
-        echo phutil_console_format(pht(
-          'Rebasing **%s** onto **%s**',
-          $this->branch,
-          $this->onto)."\n");
-        $err = phutil_passthru('git rebase %s', $this->onto);
-        if ($err) {
-          throw new ArcanistUsageException(pht(
-            "'%s' failed. You can abort with '%s', or resolve conflicts ".
-            "and use '%s' to continue forward. After resolving the rebase, ".
-            "run '%s' again.",
-            sprintf('git rebase %s', $this->onto),
-            'git rebase --abort',
-            'git rebase --continue',
-            'arc land'));
-        }
-      } else {
-        echo phutil_console_format(pht(
-          'Merging **%s** into **%s**',
-          $this->branch,
-          $this->onto)."\n");
-        $err = phutil_passthru(
-          'git merge --no-stat %s -m %s',
-          $this->onto,
-          pht("Automatic merge by '%s'", 'arc land'));
-        if ($err) {
-          throw new ArcanistUsageException(pht(
-            "'%s' failed. To continue: resolve the conflicts, commit ".
-            "the changes, then run '%s' again. To abort: run '%s'.",
-            sprintf('git merge %s', $this->onto),
-            'arc land',
-            'git merge --abort'));
-        }
-      }
-    } else if ($this->isHg) {
+    if ($this->isHg) {
       $onto_tip = $repository_api->getCanonicalRevisionName($this->onto);
       $common_ancestor = $repository_api->getCanonicalRevisionName(
         hgsprintf('ancestor(%s, %s)', $this->onto, $this->branch));
@@ -1367,31 +1303,7 @@ EOTEXT
     }
 
     if ($this->getArgument('delete-remote')) {
-      if ($this->isGit) {
-        list($err, $ref) = $repository_api->execManualLocal(
-          'rev-parse --verify %s/%s',
-          $this->remote,
-          $this->branch);
-
-        if ($err) {
-          echo pht(
-            'No remote feature %s to clean up.',
-            $this->branchType);
-          echo "\n";
-        } else {
-
-          // NOTE: In Git, you delete a remote branch by pushing it with a
-          // colon in front of its name:
-          //
-          //   git push <remote> :<branch>
-
-          echo pht('Cleaning up remote feature %s...', $this->branchType), "\n";
-          $repository_api->execxLocal(
-            'push %s :%s',
-            $this->remote,
-            $this->branch);
-        }
-      } else if ($this->isHg) {
+      if ($this->isHg) {
         // named branches were closed as part of the earlier commit
         // so only worry about bookmarks
         if ($repository_api->isBookmark($this->branch)) {
@@ -1492,13 +1404,12 @@ EOTEXT
     switch ($buildable['buildableStatus']) {
       case 'building':
         $message = pht(
-          'Harbormaster is still building the active diff for this revision:');
+          'Harbormaster is still building the active diff for this revision.');
         $prompt = pht('Land revision anyway, despite ongoing build?');
         break;
       case 'failed':
         $message = pht(
-          'Harbormaster failed to build the active diff for this revision. '.
-          'Build failures:');
+          'Harbormaster failed to build the active diff for this revision.');
         $prompt = pht('Land revision anyway, despite build failures?');
         break;
       default:
@@ -1506,28 +1417,25 @@ EOTEXT
         return;
     }
 
-    $builds = $this->getConduit()->callMethodSynchronous(
-      'harbormaster.querybuilds',
+    $builds = $this->queryBuilds(
       array(
         'buildablePHIDs' => array($buildable['phid']),
       ));
 
     $console->writeOut($message."\n\n");
-    foreach ($builds['data'] as $build) {
-      switch ($build['buildStatus']) {
-        case 'failed':
-          $color = 'red';
-          break;
-        default:
-          $color = 'yellow';
-          break;
-      }
 
-      $console->writeOut(
-        "    **<bg:".$color."> %s </bg>** %s: %s\n",
-        phutil_utf8_strtoupper($build['buildStatusName']),
-        pht('Build %d', $build['id']),
-        $build['name']);
+    $builds = msort($builds, 'getStatusSortVector');
+    foreach ($builds as $build) {
+      $ansi_color = $build->getStatusANSIColor();
+      $status_name = $build->getStatusName();
+      $object_name = $build->getObjectName();
+      $build_name = $build->getName();
+
+      echo tsprintf(
+        "    **<bg:".$ansi_color."> %s </bg>** %s: %s\n",
+        $status_name,
+        $object_name,
+        $build_name);
     }
 
     $console->writeOut(
@@ -1536,7 +1444,7 @@ EOTEXT
       pht('Harbormaster URI'),
       $buildable['uri']);
 
-    if (!$console->confirm($prompt)) {
+    if (!phutil_console_confirm($prompt)) {
       throw new ArcanistUserAbortException();
     }
   }
@@ -1565,5 +1473,35 @@ EOTEXT
       ));
     $mark_workflow->run();
   }
+
+  private function queryBuilds(array $constraints) {
+    $conduit = $this->getConduit();
+
+    // NOTE: This method only loads the 100 most recent builds. It's rare for
+    // a revision to have more builds than that and there's currently no paging
+    // wrapper for "*.search" Conduit API calls available in Arcanist.
+
+    try {
+      $raw_result = $conduit->callMethodSynchronous(
+        'harbormaster.build.search',
+        array(
+          'constraints' => $constraints,
+        ));
+    } catch (Exception $ex) {
+      // If the server doesn't have "harbormaster.build.search" yet (Aug 2016),
+      // try the older "harbormaster.querybuilds" instead.
+      $raw_result = $conduit->callMethodSynchronous(
+        'harbormaster.querybuilds',
+        $constraints);
+    }
+
+    $refs = array();
+    foreach ($raw_result['data'] as $raw_data) {
+      $refs[] = ArcanistBuildRef::newFromConduit($raw_data);
+    }
+
+    return $refs;
+  }
+
 
 }

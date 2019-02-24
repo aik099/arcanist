@@ -33,6 +33,37 @@ final class ArcanistBundleTestCase extends PhutilTestCase {
     return ArcanistBundle::newFromDiff($diff);
   }
 
+  public function testTabEncoding() {
+    // See T8768. Test that we add semantic trailing tab literals to diffs
+    // touching files with spaces in them. This is a pain to encode using the
+    // support toolset here so just do it manually.
+
+    // Note that the "b/X Y.txt" line has a trailing tab literal.
+
+    $diff = <<<EODIFF
+diff --git a/X Y.txt b/X Y.txt
+new file mode 100644
+--- /dev/null
++++ b/X Y.txt\t
+@@ -0,0 +1 @@
++quack
+
+
+EODIFF;
+
+    $bundle = ArcanistBundle::newFromDiff($diff);
+
+    $changes = $bundle->getChanges();
+    $this->assertEqual(1, count($changes));
+
+    // The path should parse as "X Y.txt" despite the trailing tab.
+    $change = head($changes);
+    $this->assertEqual('X Y.txt', $change->getCurrentPath());
+
+    // The tab should be restored when the diff is output again.
+    $this->assertEqual($diff, $bundle->toGitPatch());
+  }
+
   /**
    * Unarchive a saved git repository and apply each commit as though via
    * "arc patch", verifying that the resulting tree hash is identical to the
@@ -611,6 +642,24 @@ final class ArcanistBundleTestCase extends PhutilTestCase {
         'disjoint-hunks.new')->toUnifiedDiff());
   }
 
+  public function testMergeHunks() {
+    // Hunks should merge if represented by sufficiently few unchanged
+    // lines.
+    $this->assertEqual(
+      $this->loadResource('merge-hunks.diff'),
+      $this->loadOneChangeBundle(
+        'merge-hunks.old',
+        'merge-hunks.new')->toUnifiedDiff());
+
+    // Hunks should not merge if they are separated by too many unchanged
+    // lines.
+    $this->assertEqual(
+      $this->loadResource('no-merge-hunks.diff'),
+      $this->loadOneChangeBundle(
+        'no-merge-hunks.old',
+        'no-merge-hunks.new')->toUnifiedDiff());
+  }
+
   public function testNonlocalTrailingNewline() {
     // Diffs without changes near the end of the file should not generate a
     // bogus, change-free hunk if the file has no trailing newline.
@@ -632,11 +681,7 @@ final class ArcanistBundleTestCase extends PhutilTestCase {
     }
 
     $expect = Filesystem::readFile(dirname(__FILE__).'/base85/expect1.txt');
-    $expect = trim($expect);
-
-    $this->assertEqual(
-      $expect,
-      ArcanistBundle::encodeBase85($data));
+    $this->assertBase85($expect, $data, pht('Byte Sequences'));
 
     // This is just a large block of random binary data, it has no special
     // significance.
@@ -917,11 +962,27 @@ final class ArcanistBundleTestCase extends PhutilTestCase {
       "\xe8\x1d\xa4\x18\xf3\x73\x82\xb4\x50\x59\xc2\x34\x36\x05\xeb";
 
     $expect = Filesystem::readFile(dirname(__FILE__).'/base85/expect2.txt');
-    $expect = trim($expect);
 
-    $this->assertEqual(
-      $expect,
-      ArcanistBundle::encodeBase85($data));
+    $this->assertBase85($expect, $data, pht('Random Data'));
+  }
+
+  private function assertBase85($expect, $data, $label) {
+    $modes = array(
+      '32bit',
+    );
+
+    // If this is a 64-bit machine, we can also test 64-bit mode.
+    $has_64bit = (PHP_INT_SIZE >= 8);
+    if ($has_64bit) {
+      $modes[] = '64bit';
+    }
+
+    foreach ($modes as $mode) {
+      $this->assertEqual(
+        $expect,
+        ArcanistBundle::newBase85Data($data, "\n", $mode),
+        pht('base85/%s: %s', $mode, $label));
+    }
   }
 
 }
