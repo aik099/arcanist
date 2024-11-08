@@ -512,7 +512,7 @@ svn:mime-type = application/octet-stream
 EODIFF;
       }
 
-      $mime = $this->getSVNProperty($path, 'svn:mime-type');
+      $mime = $this->getMimeType($path);
       if ($mime != 'application/octet-stream') {
         execx(
           'svn propset svn:mime-type application/octet-stream %s',
@@ -554,7 +554,7 @@ EODIFF;
       return null;
     }
 
-    $type = $this->getSVNProperty($path, 'svn:mime-type');
+    $type = $this->getMimeType($path);
     if ($type == 'application/octet-stream') {
       return <<<EODIFF
 Index: {$path}
@@ -592,6 +592,24 @@ EODIFF;
       return $this->buildSyntheticUnchangedDiff($path);
     }
   }
+
+  protected function getMimeType($path) {
+    try {
+      $mime_type = $this->getSVNProperty($path, 'svn:mime-type');
+    }
+    catch (CommandException $e) {
+      // Return "null", when property doesn't exist.
+      if (strpos($e->getMessage(), 'W200017:') !== false) {
+        return null;
+      }
+
+      // Rethrow exception on other errors.
+      throw $e;
+    }
+
+    return $mime_type;
+  }
+
 
   protected function buildSyntheticUnchangedDiff($path) {
     $full_path = $this->getPath($path);
