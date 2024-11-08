@@ -1660,7 +1660,7 @@ EOTEXT
     while (!$done) {
       $template = rtrim($template, "\r\n")."\n\n";
       foreach ($issues as $issue) {
-        $template .= rtrim('# '.$issue)."\n";
+        $template .= rtrim('# '.str_replace("\n", "\n# ", $issue))."\n";
       }
       $template .= "\n";
 
@@ -1957,7 +1957,7 @@ EOTEXT
         pht(
           'Enter a brief description of the changes included in this update.'),
         pht('The first line is used as subject, next lines as comment.'),
-        implode("\n# ", $included_changes),
+        implode("\n# ", str_replace("\n", "\n# ", $included_changes)),
         pht('If you intended to create a new revision, use:'),
         'arc diff --create');
     }
