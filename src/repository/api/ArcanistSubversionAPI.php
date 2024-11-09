@@ -439,6 +439,7 @@ final class ArcanistSubversionAPI extends ArcanistRepositoryAPI {
       $stdout = str_replace("\r\n", "\n", $stdout);
 
       $patterns = array(
+        '/^(Working Copy Root Path): (\S+)$/m',
         '/^(URL): (\S+)$/m',
         '/^(Revision): (\d+)$/m',
         '/^(Last Changed Author): (\S+)$/m',

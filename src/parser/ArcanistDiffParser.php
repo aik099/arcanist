@@ -59,7 +59,7 @@ final class ArcanistDiffParser extends Phobject {
       }
     }
 
-    $root = null;
+    $roots = array();
     $from = array();
     foreach ($paths as $path => $status) {
       $change = $this->buildChange($path);
@@ -90,14 +90,22 @@ final class ArcanistDiffParser extends Phobject {
 
       $info = $api->getSVNInfo($path);
       if (idx($info, 'Copied From URL')) {
-        if (!$root) {
-          $rinfo = $api->getSVNInfo('.');
-          $root = $rinfo['URL'].'/';
+        $working_copy_relative_path = preg_replace(
+          '/^'.preg_quote($api->getPath(), '/').'/',
+          '/',
+          $info['Working Copy Root Path'].'/'
+        );
+
+        if (!idx($roots, $working_copy_relative_path)) {
+          $rinfo = $api->getSVNInfo($working_copy_relative_path);
+          $roots[$working_copy_relative_path] = $rinfo['URL'].'/';
         }
+
+        $root = $roots[$working_copy_relative_path];
         $cpath = $info['Copied From URL'];
         $root_len = strlen($root);
         if (!strncmp($cpath, $root, $root_len)) {
-          $cpath = substr($cpath, $root_len);
+          $cpath = ltrim($working_copy_relative_path,'/').substr($cpath, $root_len);
           // The user can "svn cp /path/to/file@12345 x", which pulls a file out
           // of version history at a specific revision. If we just use the path,
           // we'll collide with possible changes to that path in the working
