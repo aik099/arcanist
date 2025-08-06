@@ -64,7 +64,7 @@ final class PhpunitTestEngine extends ArcanistUnitTestEngine {
 
       $stderr = '-d display_errors=stderr';
 
-      $futures[$test_path] = new ExecFuture('%C %C %C --log-json %s %C %s',
+      $futures[$test_path] = new ExecFuture('%C %C %C --log-junit %s %C %s',
         $this->phpunitBinary, $config, $stderr, $json_tmp, $clover, $test_path);
       $tmpfiles[$test_path] = array(
         'json' => $json_tmp,
@@ -101,7 +101,7 @@ final class PhpunitTestEngine extends ArcanistUnitTestEngine {
    */
   private function parseTestResults($path, $json_tmp, $clover_tmp, $stderr) {
     $test_results = Filesystem::readFile($json_tmp);
-    return id(new ArcanistPhpunitTestResultParser())
+    return id(new ArcanistXUnitTestResultParser())
       ->setEnableCoverage($this->getEnableCoverage())
       ->setProjectRoot($this->projectRoot)
       ->setCoverageFile($clover_tmp)
