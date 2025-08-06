@@ -66,6 +66,12 @@ final class PhpunitTestEngine extends ArcanistUnitTestEngine {
 
       $futures[$test_path] = new ExecFuture('%C %C %C --log-junit %s %C %s',
         $this->phpunitBinary, $config, $stderr, $json_tmp, $clover, $test_path);
+
+      // Required for xDebug 3.x.
+      if ($this->getEnableCoverage() !== false) {
+        $futures[$test_path]->setEnv(array('XDEBUG_MODE' => 'coverage'));
+      }
+
       $tmpfiles[$test_path] = array(
         'json' => $json_tmp,
         'clover' => $clover_tmp,
