@@ -103,6 +103,10 @@ EOTEXT
           'With %s, use uglier (but more efficient) formatting.',
           '--json'),
       ),
+      'cl' => array(
+        'help' => 'Select changelist',
+        'supports' => array('svn'),
+      ),
       '*' => 'paths',
     );
   }
@@ -140,6 +144,10 @@ EOTEXT
           'associated with a tracked file in the working copy.',
           '--everything',
           '--everything'));
+    }
+
+    if ($this->getArgument('cl')) {
+      $this->selectChangelist();
     }
 
     if ($everything) {
