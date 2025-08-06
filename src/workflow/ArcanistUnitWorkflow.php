@@ -166,7 +166,8 @@ EOTEXT
     $renderer = new ArcanistUnitConsoleRenderer();
     $this->engine->setRenderer($renderer);
 
-    $enable_coverage = null; // Means "default".
+    //$enable_coverage = null; // Means "default".
+    $enable_coverage = false; // Disable code coverage by default.
     if ($this->getArgument('coverage') ||
         $this->getArgument('detailed-coverage')) {
       $enable_coverage = true;
