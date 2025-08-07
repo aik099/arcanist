@@ -838,7 +838,7 @@ phutil_register_library_map(array(
     'ArcanistXHPASTLinterTestCase' => 'ArcanistLinterTestCase',
     'ArcanistXMLLinter' => 'ArcanistLinter',
     'ArcanistXMLLinterTestCase' => 'ArcanistLinterTestCase',
-    'ArcanistXUnitTestResultParser' => 'Phobject',
+    'ArcanistXUnitTestResultParser' => 'ArcanistTestResultParser',
     'CSharpToolsTestEngine' => 'XUnitTestEngine',
     'NoseTestEngine' => 'ArcanistUnitTestEngine',
     'PhpunitTestEngine' => 'ArcanistUnitTestEngine',
