@@ -137,7 +137,7 @@ final class PhpunitTestEngine extends ArcanistUnitTestEngine {
       substr($file, 0, -4).'Test.php',
     );
 
-    $search = self::getSearchLocationsForTests($path);
+    $search = self::getSearchLocationsForTests($path, $root);
 
     foreach ($search as $search_path) {
       foreach ($possible_files as $possible_file) {
@@ -199,13 +199,14 @@ final class PhpunitTestEngine extends ArcanistUnitTestEngine {
    * intentionally filesystem-agnostic to be unit testable.
    *
    * @param   string        PHP file to locate test cases for.
+   * @param   string        The root directory.
    * @return  list<string>  List of directories to search for tests in.
    */
-  public static function getSearchLocationsForTests($path) {
+  public static function getSearchLocationsForTests($path, $root) {
     $file = basename($path);
     $dir  = dirname($path);
 
-    $test_dir_names = array('tests', 'Tests');
+    $test_dir_names = array('tests', 'tests' . DIRECTORY_SEPARATOR . 'Unit', 'Tests');
 
     $try_directories = array();
 
@@ -213,7 +214,7 @@ final class PhpunitTestEngine extends ArcanistUnitTestEngine {
     $try_directories[] = array($dir);
 
     // Try in a tests/ directory anywhere in the ancestry.
-    foreach (Filesystem::walkToRoot($dir) as $parent_dir) {
+    foreach (self::walkToRoot($dir, $root) as $parent_dir) {
       if ($parent_dir == '/') {
         // We'll restore this later.
         $parent_dir = '';
@@ -224,13 +225,14 @@ final class PhpunitTestEngine extends ArcanistUnitTestEngine {
     }
 
     // Try replacing each directory component with 'tests/'.
-    $parts = trim($dir, DIRECTORY_SEPARATOR);
+    $parts = preg_replace('/^'.preg_quote($root, '/').'/', '', $dir);
+    $parts = trim($parts, DIRECTORY_SEPARATOR);
     $parts = explode(DIRECTORY_SEPARATOR, $parts);
     foreach (array_reverse(array_keys($parts)) as $key) {
       foreach ($test_dir_names as $test_dir_name) {
         $try = $parts;
         $try[$key] = $test_dir_name;
-        array_unshift($try, '');
+        array_unshift($try, $root);
         $try_directories[] = $try;
       }
     }
@@ -240,7 +242,7 @@ final class PhpunitTestEngine extends ArcanistUnitTestEngine {
       foreach ($test_dir_names as $test_dir_name) {
         $try = $parts;
         $try[$key] = $test_dir_name.DIRECTORY_SEPARATOR.$try[$key];
-        array_unshift($try, '');
+        array_unshift($try, $root);
         $try_directories[] = $try;
       }
     }
@@ -251,6 +253,24 @@ final class PhpunitTestEngine extends ArcanistUnitTestEngine {
     }
 
     return array_keys($results);
+  }
+
+  private static function walkToRoot($dir, $root) {
+    $dir = preg_replace('/^'.preg_quote($root, '/').'/', '', $dir, 1);
+
+    $ret = array();
+    $parts = explode(DIRECTORY_SEPARATOR, $dir);
+
+    while (true) {
+      $ret[] = $root . implode(DIRECTORY_SEPARATOR, $parts);
+      array_pop($parts);
+
+      if (!$parts) {
+        break;
+      }
+    }
+
+    return $ret;
   }
 
   /**
