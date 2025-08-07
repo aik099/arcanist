@@ -206,7 +206,7 @@ final class PhpunitTestEngine extends ArcanistUnitTestEngine {
     $file = basename($path);
     $dir  = dirname($path);
 
-    $test_dir_names = array('tests', 'Tests');
+    $test_dir_names = array('tests', 'tests' . DIRECTORY_SEPARATOR . 'Unit', 'Tests');
 
     $try_directories = array();
 
