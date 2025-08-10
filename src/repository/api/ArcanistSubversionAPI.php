@@ -339,10 +339,25 @@ final class ArcanistSubversionAPI extends ArcanistRepositoryAPI {
   public function getBranchName() {
     $info = $this->getSVNInfo('/');
     $repo_root = idx($info, 'Repository Root');
-    $repo_root_length = strlen($repo_root);
     $url = idx($info, 'URL');
+
+    if ($repo_root === $url) {
+      return '';
+    }
+
+    $repo_root_length = strlen($repo_root);
     if (substr($url, 0, $repo_root_length) == $repo_root) {
-      return substr($url, $repo_root_length);
+      $parts = explode('/', substr($url, $repo_root_length));
+
+      // Return "trunk" as-is.
+      if (end($parts) === 'trunk') {
+        return 'trunk';
+      }
+
+      // Return "branches/branch-name", "tags/tag-name", etc.
+      $part_count = count($parts);
+
+      return $parts[$part_count - 2] . '/' . $parts[$part_count - 1];
     }
     return 'svn';
   }
