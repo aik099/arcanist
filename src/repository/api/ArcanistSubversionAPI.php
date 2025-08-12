@@ -309,8 +309,7 @@ final class ArcanistSubversionAPI extends ArcanistRepositoryAPI {
   }
 
   public function getSourceControlBaseRevision() {
-    $info = $this->getSVNInfo('/');
-    return $info['URL'].'@'.$this->getSVNBaseRevisionNumber();
+    return $this->getSourceControlPath().'@'.$this->getSVNBaseRevisionNumber();
   }
 
   public function getCanonicalRevisionName($string) {
@@ -789,7 +788,7 @@ EODIFF;
   }
 
   public function getWorkingCopyRevision() {
-    return $this->getSourceControlBaseRevision();
+    return $this->getSVNBaseRevisionNumber();
   }
 
   public function supportsLocalBranchMerge() {
