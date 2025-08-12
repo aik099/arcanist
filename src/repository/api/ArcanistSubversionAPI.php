@@ -314,11 +314,26 @@ final class ArcanistSubversionAPI extends ArcanistRepositoryAPI {
   }
 
   public function getCanonicalRevisionName($string) {
-    // TODO: This could be more accurate, but is only used by `arc browse`
-    // for now.
+    $revision_keywords = array('HEAD', 'BASE', 'COMMITTED', 'PREV');
 
+    // Can be specified in the "arc browse <revision>" command.
+    if (in_array($string, $revision_keywords)) {
+      list($stdout, $stderr) = $this->buildLocalFuture(array(
+        'info . --revision %s --xml', $string))
+        ->resolvex();
+      $info = new SimpleXMLElement($stdout);
+
+      return (int)$info->entry->commit['revision'];
+    }
+
+    // Format used in the "differential_diff.sourceControlBaseRevision" column.
+    if (preg_match('/.*@(\d+.*)$/', $string, $regs)) {
+      return (int)$regs[1];
+    }
+
+    // Exact revision number.
     if (is_numeric($string)) {
-      return $string;
+      return (int)$string;
     }
     return null;
   }
