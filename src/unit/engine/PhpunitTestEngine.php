@@ -12,6 +12,24 @@ final class PhpunitTestEngine extends ArcanistUnitTestEngine {
 
   public function run() {
     $this->projectRoot = $this->getWorkingCopy()->getProjectRoot();
+    $this->collectAffectedTests();
+    $this->prepareConfigFile();
+
+    // Use single process for coverage collection to speed up things.
+    if ($this->getEnableCoverage() !== false) {
+      return $this->runTestsSequentially();
+    }
+
+    return $this->runTestsInParallel();
+  }
+
+  /**
+   * Collects affected tests.
+   *
+   * @return void
+   * @throws ArcanistNoEffectException When no tests were found.
+   */
+  private function collectAffectedTests() {
     $this->affectedTests = array();
     foreach ($this->getPaths() as $path) {
 
@@ -25,11 +43,11 @@ final class PhpunitTestEngine extends ArcanistUnitTestEngine {
 
       // Not sure if it would make sense to go further if
       // it is not a .php file
-      if (substr($path, -4) != '.php') {
+      if (substr($path, -4) !== '.php') {
         continue;
       }
 
-      if (substr($path, -8) == 'Test.php') {
+      if (substr($path, -8) === 'Test.php') {
         // Looks like a valid test file name.
         $this->affectedTests[$path] = $path;
         continue;
@@ -41,17 +59,23 @@ final class PhpunitTestEngine extends ArcanistUnitTestEngine {
 
     }
 
+    $this->affectedTests = array_filter($this->affectedTests,
+      array('Filesystem', 'pathExists'));
+
     if (empty($this->affectedTests)) {
       throw new ArcanistNoEffectException(pht('No tests to run.'));
     }
+  }
 
-    $this->prepareConfigFile();
+  /**
+   * Runs tests in parallel.
+   *
+   * @return ArcanistUnitTestResult[]
+   */
+  private function runTestsInParallel() {
     $futures = array();
     $tmpfiles = array();
     foreach ($this->affectedTests as $class_path => $test_path) {
-      if (!Filesystem::pathExists($test_path)) {
-        continue;
-      }
       $json_tmp = new TempFile();
       $clover_tmp = null;
       $clover = null;
@@ -82,7 +106,6 @@ final class PhpunitTestEngine extends ArcanistUnitTestEngine {
     $futures = id(new FutureIterator($futures))
       ->limit(4);
     foreach ($futures as $test => $future) {
-
       list($err, $stdout, $stderr) = $future->resolve();
 
       $results[] = $this->parseTestResults(
@@ -93,6 +116,44 @@ final class PhpunitTestEngine extends ArcanistUnitTestEngine {
     }
 
     return array_mergev($results);
+  }
+
+  /**
+   * Runs tests sequentially.
+   *
+   * @return ArcanistUnitTestResult[]
+   */
+  private function runTestsSequentially() {
+    $this->patchConfigFile();
+
+    $json_tmp = new TempFile();
+    $clover_tmp = null;
+    $clover = null;
+
+    if ($this->getEnableCoverage() !== false) {
+      $clover_tmp = new TempFile();
+      $clover = csprintf('--coverage-clover %s', $clover_tmp);
+    }
+
+    $stderr = '-d display_errors=stderr';
+
+    $exec_future = new ExecFuture('%C -c %s %C --log-junit %s %C --testsuite arc',
+      $this->phpunitBinary, $this->configFile, $stderr, $json_tmp, $clover);
+
+    // Required for xDebug 3.x.
+    if ($this->getEnableCoverage() !== false) {
+      $exec_future->setEnv(array('XDEBUG_MODE' => 'coverage'));
+    }
+
+    list($err, $stdout, $stderr) = $exec_future->resolve();
+
+    Filesystem::remove($this->configFile);
+
+    return $this->parseTestResults(
+      'arc',
+      $json_tmp,
+      $clover_tmp,
+      $stderr);
   }
 
   /**
@@ -301,6 +362,46 @@ final class PhpunitTestEngine extends ArcanistUnitTestEngine {
         $this->phpunitBinary = Filesystem::resolvePath($bin, $project_root);
       }
     }
+  }
+
+  /**
+   * Patches a config file.
+   *
+   * @return void
+   */
+  private function patchConfigFile()
+  {
+    if (!$this->configFile) {
+      $this->configFile = tempnam($this->projectRoot, 'arc-unit-'.getmypid().'-');
+
+      $phpunit_config_file_data = <<<XML
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit beStrictAboutOutputDuringTests="true">
+    <testsuites/>
+</phpunit>
+XML;
+    } else {
+      $phpunit_config_file_data = Filesystem::readFile($this->configFile);
+
+      // Ensure, that relative paths in config will work.
+      $this->configFile = tempnam(dirname($this->configFile), 'arc-unit-'.getmypid().'-');
+    }
+
+    $root = new SimpleXMLElement($phpunit_config_file_data);
+
+    $testsuites = $root->testsuites;
+    if (count($testsuites) === 0) {
+      $testsuites = $root->addChild('testsuites');
+    }
+
+    $testsuite = $testsuites->addChild('testsuite');
+    $testsuite->addAttribute('name', 'arc');
+
+    foreach ($this->affectedTests as $class_path => $test_path) {
+      $testsuite->addChild('file', $test_path);
+    }
+
+    Filesystem::writeFile($this->configFile, $root->asXML());
   }
 
 }
