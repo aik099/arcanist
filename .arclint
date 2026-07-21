@@ -1,6 +1,7 @@
 {
   "exclude": [
-    "(^externals/)"
+    "(^externals/)",
+    "(^\\.phpstorm\\.meta\\.php$)"
   ],
   "linters": {
     "chmod": {
