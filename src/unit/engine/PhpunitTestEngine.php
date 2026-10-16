@@ -9,11 +9,12 @@ final class PhpunitTestEngine extends ArcanistUnitTestEngine {
   private $phpunitBinary = 'phpunit';
   private $affectedTests;
   private $projectRoot;
+  private $testFileIndex;
 
   public function run() {
     $this->projectRoot = $this->getWorkingCopy()->getProjectRoot();
-    $this->collectAffectedTests();
     $this->prepareConfigFile();
+    $this->collectAffectedTests();
 
     // Use single process for coverage collection to speed up things.
     if ($this->getEnableCoverage() !== false) {
@@ -53,8 +54,12 @@ final class PhpunitTestEngine extends ArcanistUnitTestEngine {
         continue;
       }
 
-      if ($test = $this->findTestFile($path)) {
-        $this->affectedTests[$path] = $test;
+      $tests = $this->findTestFiles($path);
+      if ($tests) {
+        $this->affectedTests[$path] = array_shift($tests);
+        foreach ($tests as $test) {
+          $this->affectedTests[$test] = $test;
+        }
       }
 
     }
@@ -179,27 +184,43 @@ final class PhpunitTestEngine extends ArcanistUnitTestEngine {
 
 
   /**
-   * Search for test cases for a given file in a large number of "reasonable"
-   * locations. See @{method:getSearchLocationsForTests} for specifics.
+   * Search for test cases for a given file among test files of test suites
+   * from the PHPUnit configuration file. Without test suites, search in a
+   * large number of "reasonable" locations instead. See
+   * @{method:getSearchLocationsForTests} for specifics.
    *
-   * TODO: Add support for finding tests in testsuite folders from
-   * phpunit.xml configuration.
-   *
-   * @param   string      PHP file to locate test cases for.
-   * @return  string|null Path to test cases, or null.
+   * @param   string        PHP file to locate test cases for.
+   * @return  list<string>  Paths to test cases.
    */
-  private function findTestFile($path) {
+  private function findTestFiles($path) {
     $root = $this->projectRoot;
     $path = Filesystem::resolvePath($path, $root);
 
-    $file = basename($path);
-    $possible_files = array(
-      $file,
-      substr($file, 0, -4).'Test.php',
-    );
+    $possible_files = self::getTestFileNames(
+      basename($path),
+      self::getDeclaredClassNames(Filesystem::readFile($path)));
+
+    if ($this->testFileIndex !== null) {
+      $found = array();
+      foreach ($possible_files as $possible_file) {
+        if (empty($this->testFileIndex[$possible_file])) {
+          continue;
+        }
+        foreach ($this->testFileIndex[$possible_file] as $test_file) {
+          if (0 == strcasecmp($test_file, $path)) {
+            // Don't return the original file.
+            continue;
+          }
+          $found[$test_file] = $test_file;
+        }
+      }
+
+      return array_values($found);
+    }
 
     $search = self::getSearchLocationsForTests($path, $root);
 
+    $found = array();
     foreach ($search as $search_path) {
       foreach ($possible_files as $possible_file) {
         $full_path = $search_path.$possible_file;
@@ -215,11 +236,52 @@ final class PhpunitTestEngine extends ArcanistUnitTestEngine {
           // Don't return the original file.
           continue;
         }
-        return $full_path;
+        $found[Filesystem::resolvePath($full_path)] = $full_path;
       }
     }
 
-    return null;
+    return array_values($found);
+  }
+
+  /**
+   * Get test file names for a given file: named after the file itself
+   * (e.g. "file_name.php" -> "file_nameTest.php") and after each class,
+   * interface or trait declared in it (e.g. "ClassNameTest.php").
+   *
+   * @param   string        File name of the PHP file to locate test cases for.
+   * @param   list<string>  Names of classes declared in that file.
+   * @return  list<string>  Test file names.
+   */
+  public static function getTestFileNames($file, array $class_names) {
+    $names = array(
+      $file,
+      substr($file, 0, -4).'Test.php',
+    );
+
+    foreach ($class_names as $class_name) {
+      $names[] = $class_name.'Test.php';
+    }
+
+    return array_values(array_unique($names));
+  }
+
+  /**
+   * Get names of classes, interfaces and traits declared in PHP code.
+   *
+   * @param   string        PHP code.
+   * @return  list<string>  Declared class names.
+   */
+  public static function getDeclaredClassNames($source) {
+    // Declarations start a line, unlike "Foo::class", "new class" or
+    // mentions in comments and strings.
+    $matches = null;
+    preg_match_all(
+      '/^[ \t]*(?:(?:abstract|final|readonly)[ \t]+)*'.
+      '(?:class|interface|trait)[ \t]+([a-z_\x80-\xff][a-z0-9_\x80-\xff]*)/im',
+      $source,
+      $matches);
+
+    return array_values(array_unique($matches[1]));
   }
 
 
@@ -267,13 +329,7 @@ final class PhpunitTestEngine extends ArcanistUnitTestEngine {
     $file = basename($path);
     $dir  = dirname($path);
 
-    $test_dir_names = array(
-      'tests',
-      'tests' . DIRECTORY_SEPARATOR . 'Unit',
-      'tests' . DIRECTORY_SEPARATOR . 'Functional',
-      'tests' . DIRECTORY_SEPARATOR . 'UI',
-      'Tests',
-    );
+    $test_dir_names = array('tests', 'Tests');
 
     $try_directories = array();
 
@@ -352,6 +408,7 @@ final class PhpunitTestEngine extends ArcanistUnitTestEngine {
     if ($config) {
       if (Filesystem::pathExists($project_root.$config)) {
         $this->configFile = $project_root.$config;
+        $this->testFileIndex = self::buildTestFileIndex($this->configFile);
       } else {
         throw new Exception(
           pht(
@@ -368,6 +425,208 @@ final class PhpunitTestEngine extends ArcanistUnitTestEngine {
         $this->phpunitBinary = Filesystem::resolvePath($bin, $project_root);
       }
     }
+  }
+
+  /**
+   * Builds an index of test files from test suites of a PHPUnit
+   * configuration file.
+   *
+   * @param   string  PHPUnit configuration file.
+   * @return  map<string, list<string>>|null  Test file paths by file name,
+   *                                          or null without test suites.
+   */
+  private static function buildTestFileIndex($config_file) {
+    $suites = self::parseTestSuites(
+      Filesystem::readFile($config_file),
+      dirname($config_file));
+
+    if (!$suites['directories'] && !$suites['files']) {
+      return null;
+    }
+
+    $excludes = array();
+    foreach (self::expandPaths($suites['excludes']) as $exclude) {
+      $excludes[] = rtrim($exclude, DIRECTORY_SEPARATOR);
+    }
+
+    $index = array();
+    foreach (self::expandPaths($suites['files']) as $file) {
+      $index[basename($file)][$file] = true;
+    }
+
+    foreach ($suites['directories'] as $directory) {
+      foreach (self::expandPaths(array($directory['path'])) as $dir) {
+        $test_files = self::findDirectoryTestFiles(
+          $dir,
+          $directory['prefix'],
+          $directory['suffix'],
+          $excludes);
+        foreach ($test_files as $file) {
+          $index[basename($file)][$file] = true;
+        }
+      }
+    }
+
+    return array_map('array_keys', $index);
+  }
+
+  /**
+   * Finds test files in a test suite directory and its subdirectories.
+   *
+   * @param   string        Test suite directory.
+   * @param   string        Test file name prefix.
+   * @param   string        Test file name suffix.
+   * @param   list<string>  Excluded paths.
+   * @return  list<string>  Test file paths.
+   */
+  private static function findDirectoryTestFiles(
+    $dir,
+    $prefix,
+    $suffix,
+    array $excludes) {
+
+    if (!is_dir($dir)) {
+      return array();
+    }
+
+    $ret = array();
+    $iterator = new RecursiveIteratorIterator(
+      new RecursiveDirectoryIterator($dir));
+    foreach ($iterator as $file) {
+      if (!$file->isFile() ||
+          !self::hasAffixes($file->getFilename(), $prefix, $suffix)) {
+        continue;
+      }
+
+      $file_path = $file->getPathname();
+      foreach ($excludes as $exclude) {
+        $exclude_dir = $exclude.DIRECTORY_SEPARATOR;
+        if ($file_path === $exclude ||
+            !strncmp($file_path, $exclude_dir, strlen($exclude_dir))) {
+          continue 2;
+        }
+      }
+
+      $ret[] = $file_path;
+    }
+
+    return $ret;
+  }
+
+  /**
+   * Parses test suites of a PHPUnit configuration.
+   *
+   * @param   string  PHPUnit configuration (XML).
+   * @param   string  Directory of the configuration file, which relative
+   *                  paths are resolved against.
+   * @return  dict    Test suite "directories" (with "path", "prefix" and
+   *                  "suffix"), "files" and "excludes" (paths may contain
+   *                  wildcards).
+   */
+  public static function parseTestSuites($config, $config_dir) {
+    $xml = new SimpleXMLElement($config);
+
+    $directories = array();
+    $files = array();
+    $excludes = array();
+    foreach ($xml->xpath('//testsuites/testsuite') as $testsuite) {
+      foreach ($testsuite->directory as $directory) {
+        $path = self::resolveConfigPath((string)$directory, $config_dir);
+        $prefix = isset($directory['prefix'])
+          ? (string)$directory['prefix']
+          : '';
+        $suffix = isset($directory['suffix'])
+          ? (string)$directory['suffix']
+          : 'Test.php';
+
+        $directories[$path.'|'.$prefix.'|'.$suffix] = array(
+          'path' => $path,
+          'prefix' => $prefix,
+          'suffix' => $suffix,
+        );
+      }
+
+      foreach ($testsuite->file as $file) {
+        $path = self::resolveConfigPath((string)$file, $config_dir);
+        $files[$path] = $path;
+      }
+
+      foreach ($testsuite->exclude as $exclude) {
+        $path = self::resolveConfigPath((string)$exclude, $config_dir);
+        $excludes[$path] = $path;
+      }
+    }
+
+    return array(
+      'directories' => array_values($directories),
+      'files' => array_values($files),
+      'excludes' => array_values($excludes),
+    );
+  }
+
+  /**
+   * Resolves a path from a PHPUnit configuration file without touching the
+   * filesystem.
+   *
+   * @param   string  Path (absolute or relative).
+   * @param   string  Directory of the configuration file.
+   * @return  string  Absolute path.
+   */
+  private static function resolveConfigPath($path, $config_dir) {
+    $path = trim($path);
+    if (strncmp($path, DIRECTORY_SEPARATOR, 1) !== 0) {
+      $path = $config_dir.DIRECTORY_SEPARATOR.$path;
+    }
+
+    $parts = array();
+    foreach (explode(DIRECTORY_SEPARATOR, $path) as $part) {
+      if ($part === '' || $part === '.') {
+        continue;
+      }
+      if ($part === '..') {
+        array_pop($parts);
+        continue;
+      }
+      $parts[] = $part;
+    }
+
+    return DIRECTORY_SEPARATOR.implode(DIRECTORY_SEPARATOR, $parts);
+  }
+
+  /**
+   * Expands wildcards in paths.
+   *
+   * @param   list<string>  Paths (may contain wildcards).
+   * @return  list<string>  Existing paths.
+   */
+  private static function expandPaths(array $paths) {
+    $ret = array();
+    foreach ($paths as $path) {
+      $matches = glob($path);
+      if ($matches) {
+        foreach ($matches as $match) {
+          $ret[] = $match;
+        }
+      }
+    }
+
+    return $ret;
+  }
+
+  /**
+   * Checks, that a file name has given prefix and suffix.
+   *
+   * @param   string  File name.
+   * @param   string  Prefix.
+   * @param   string  Suffix.
+   * @return  bool
+   */
+  private static function hasAffixes($name, $prefix, $suffix) {
+    if ($prefix !== '' && strncmp($name, $prefix, strlen($prefix)) !== 0) {
+      return false;
+    }
+
+    return $suffix === '' || substr($name, -strlen($suffix)) === $suffix;
   }
 
   /**
@@ -403,7 +662,7 @@ XML;
     $testsuite = $testsuites->addChild('testsuite');
     $testsuite->addAttribute('name', 'arc');
 
-    foreach ($this->affectedTests as $class_path => $test_path) {
+    foreach (array_unique($this->affectedTests) as $test_path) {
       $testsuite->addChild('file', $test_path);
     }
 
